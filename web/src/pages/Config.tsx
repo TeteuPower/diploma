@@ -1,0 +1,294 @@
+import { useEffect, useState } from 'react';
+import type { DiplomaConfig, ModoAutonomia, AcaoSensivel } from '@shared/types';
+import { ACOES_SENSIVEIS } from '@shared/types';
+import { Panel, Field, TextInput, TextArea, Select, Toggle, OptionCard } from '../components/ui';
+import {
+  ROTULO_MODO, DESCRICAO_MODO, CORES_MODO, ICONE_MODO, ROTULO_ACAO, HINT_ACAO,
+} from '../lib/modo';
+import { patchConfig, fecharNavegador } from '../api';
+
+const MODOS: ModoAutonomia[] = ['observar', 'assistido', 'guiado', 'autonomo'];
+
+export function Config({
+  config,
+  onMudou,
+}: {
+  config: DiplomaConfig | null;
+  onMudou: () => void;
+}) {
+  // Estado local para os campos de texto: salvar a cada tecla brigaria com o
+  // PATCH e faria o cursor pular. Toggles e seleções salvam na hora.
+  const [nome, setNome] = useState('');
+  const [urlBase, setUrlBase] = useState('');
+  const [caminhoLogin, setCaminhoLogin] = useState('');
+  const [instrucoes, setInstrucoes] = useState('');
+  const [sujo, setSujo] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+
+  useEffect(() => {
+    if (!config || sujo) return;
+    setNome(config.alvo.nome);
+    setUrlBase(config.alvo.urlBase);
+    setCaminhoLogin(config.alvo.caminhoLogin);
+    setInstrucoes(config.instrucoes);
+  }, [config, sujo]);
+
+  if (!config) return null;
+
+  const salvar = async (patch: Partial<DiplomaConfig>) => {
+    setSalvando(true);
+    try {
+      await patchConfig(patch);
+      onMudou();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const salvarTextos = async () => {
+    await salvar({
+      alvo: { nome, urlBase, caminhoLogin },
+      instrucoes,
+    });
+    setSujo(false);
+  };
+
+  const alternarAcao = (acao: AcaoSensivel) => {
+    const atual = config.exigemAprovacao;
+    const proximo = atual.includes(acao) ? atual.filter((a) => a !== acao) : [...atual, acao];
+    void salvar({ exigemAprovacao: proximo });
+  };
+
+  return (
+    <div className="mx-auto flex max-w-3xl flex-col gap-5">
+      <Panel
+        title="O domínio apontado"
+        icon="🎯"
+        accent="#38e0d8"
+        right={
+          sujo && (
+            <button
+              type="button"
+              className="btn-primary px-3 py-1 text-xs"
+              disabled={salvando}
+              onClick={() => void salvarTextos()}
+            >
+              {salvando ? 'Salvando…' : 'Salvar'}
+            </button>
+          )
+        }
+      >
+        <p className="mb-4 text-xs leading-relaxed text-white/45">
+          Este endereço é a fronteira do agente:{' '}
+          <strong className="text-white/70">ele não navega para fora daqui</strong>. A trava é
+          código, não instrução de prompt — vale contra o modelo se perder e contra link plantado
+          numa página do curso.
+        </p>
+
+        <Field label="Nome da plataforma" hint="Só para você reconhecer na interface.">
+          <TextInput
+            value={nome}
+            onChange={(e) => {
+              setNome(e.target.value);
+              setSujo(true);
+            }}
+            placeholder="AVA da faculdade"
+          />
+        </Field>
+
+        <Field label="Endereço base" hint="Ex.: https://ava.faculdade.edu.br — subdomínios entram junto.">
+          <TextInput
+            value={urlBase}
+            onChange={(e) => {
+              setUrlBase(e.target.value);
+              setSujo(true);
+            }}
+            placeholder="https://ava.faculdade.edu.br"
+          />
+        </Field>
+
+        <Field label="Caminho do login" hint="A rota da tela de entrada, se não for a raiz.">
+          <TextInput
+            value={caminhoLogin}
+            onChange={(e) => {
+              setCaminhoLogin(e.target.value);
+              setSujo(true);
+            }}
+            placeholder="/login"
+          />
+        </Field>
+      </Panel>
+
+      <Panel title="Quanta corda o agente tem" icon="🎚️" accent={CORES_MODO[config.modo]}>
+        <div className="grid grid-cols-2 gap-2.5">
+          {MODOS.map((m) => (
+            <OptionCard
+              key={m}
+              selecionado={config.modo === m}
+              onClick={() => void salvar({ modo: m })}
+              titulo={ROTULO_MODO[m]}
+              descricao={DESCRICAO_MODO[m]}
+              icone={ICONE_MODO[m]}
+              cor={CORES_MODO[m]}
+            />
+          ))}
+        </div>
+
+        {config.modo === 'guiado' && (
+          <div className="mt-4 animate-fade-in">
+            <div className="label">O que ainda para para você aprovar</div>
+            <div className="flex flex-col gap-2">
+              {ACOES_SENSIVEIS.map((a) => (
+                <Toggle
+                  key={a}
+                  checked={config.exigemAprovacao.includes(a)}
+                  onChange={() => alternarAcao(a)}
+                  label={ROTULO_ACAO[a]}
+                  hint={HINT_ACAO[a]}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {config.modo === 'autonomo' && (
+          <p className="mt-4 rounded-xl border border-accent-rose/30 bg-accent-rose/[0.07] p-3 text-xs leading-relaxed text-accent-rose/90">
+            Sem rede de segurança: uma questão lida errado vira uma resposta enviada, e submissão
+            de quiz normalmente não volta atrás. Vale deixar o agente acertar algumas vezes no modo
+            assistido antes de soltar aqui.
+          </p>
+        )}
+      </Panel>
+
+      <Panel title="Navegador" icon="🌐" accent="#8b7bff">
+        <div className="mb-4 flex flex-col gap-2">
+          <Toggle
+            checked={!config.navegador.headless}
+            onChange={(v) => void salvar({ navegador: { ...config.navegador, headless: !v } })}
+            label="Mostrar a janela do navegador"
+            hint="Com a janela aberta você acompanha e resolve captcha/2FA na mão quando ele travar."
+          />
+          <Toggle
+            checked={config.navegador.perfilPersistente}
+            onChange={(v) =>
+              void salvar({ navegador: { ...config.navegador, perfilPersistente: v } })
+            }
+            label="Manter a sessão entre execuções"
+            hint="Guarda os cookies do LMS em perfil-navegador/. Loga uma vez e nas próximas já entra."
+          />
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Teto de passos" hint="Trava contra loop.">
+            <TextInput
+              type="number"
+              min={5}
+              max={500}
+              value={config.navegador.maxPassos}
+              onChange={(e) =>
+                void salvar({
+                  navegador: { ...config.navegador, maxPassos: Number(e.target.value) },
+                })
+              }
+            />
+          </Field>
+          <Field label="Timeout de ação (ms)" hint="Espera por elemento.">
+            <TextInput
+              type="number"
+              min={3000}
+              max={120000}
+              step={1000}
+              value={config.navegador.timeoutMs}
+              onChange={(e) =>
+                void salvar({
+                  navegador: { ...config.navegador, timeoutMs: Number(e.target.value) },
+                })
+              }
+            />
+          </Field>
+          <Field label="Espera por você (s)" hint="Depois disso, a ação é recusada.">
+            <TextInput
+              type="number"
+              min={30}
+              max={7200}
+              step={30}
+              value={config.navegador.timeoutAprovacaoS}
+              onChange={(e) =>
+                void salvar({
+                  navegador: { ...config.navegador, timeoutAprovacaoS: Number(e.target.value) },
+                })
+              }
+            />
+          </Field>
+        </div>
+
+        <button type="button" className="btn-ghost" onClick={() => void fecharNavegador()}>
+          Fechar o navegador agora
+        </button>
+      </Panel>
+
+      <Panel
+        title="O modelo"
+        icon="🧠"
+        accent="#f5b955"
+        right={
+          sujo && (
+            <button
+              type="button"
+              className="btn-primary px-3 py-1 text-xs"
+              disabled={salvando}
+              onClick={() => void salvarTextos()}
+            >
+              {salvando ? 'Salvando…' : 'Salvar'}
+            </button>
+          )
+        }
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Modelo" hint="'Padrão' usa o da sua assinatura do Claude Code.">
+            <Select
+              value={config.modelo}
+              onChange={(e) =>
+                void salvar({ modelo: e.target.value as DiplomaConfig['modelo'] })
+              }
+            >
+              <option value="default">Padrão da assinatura</option>
+              <option value="claude-opus-5">Opus 5 — o mais capaz</option>
+              <option value="claude-sonnet-5">Sonnet 5 — equilibrado</option>
+              <option value="claude-haiku-4-5-20251001">Haiku 4.5 — rápido e barato</option>
+            </Select>
+          </Field>
+          <Field label="Esforço de raciocínio">
+            <Select
+              value={config.esforco}
+              onChange={(e) =>
+                void salvar({ esforco: e.target.value as DiplomaConfig['esforco'] })
+              }
+            >
+              <option value="low">Baixo</option>
+              <option value="medium">Médio</option>
+              <option value="high">Alto — melhor em questão difícil</option>
+            </Select>
+          </Field>
+        </div>
+
+        <Field
+          label="Instruções permanentes"
+          hint="Entram no system prompt de toda sessão. Ex.: regras da disciplina, o que nunca fazer, onde achar o material."
+        >
+          <TextArea
+            rows={5}
+            value={instrucoes}
+            onChange={(e) => {
+              setInstrucoes(e.target.value);
+              setSujo(true);
+            }}
+            placeholder={'Ex.: Nunca finalize uma tentativa sem antes revisar todas as questões.\nO material de apoio fica na aba "Conteúdo" de cada módulo.'}
+          />
+        </Field>
+      </Panel>
+    </div>
+  );
+}

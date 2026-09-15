@@ -1,0 +1,83 @@
+import type {
+  DiplomaConfig,
+  EstadoCofre,
+  CredencialMeta,
+  Sessao,
+  HealthInfo,
+  SessaoStreamEvent,
+} from '@shared/types';
+
+async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
+  });
+  if (!res.ok) {
+    const detalhe = await res.text().catch(() => '');
+    throw new Error(detalhe || `${res.status} ${url}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+// --- Config ---
+export const getConfig = () => jsonFetch<DiplomaConfig>('/api/config');
+export const patchConfig = (patch: Partial<DiplomaConfig>) =>
+  jsonFetch<DiplomaConfig>('/api/config', { method: 'PATCH', body: JSON.stringify(patch) });
+
+// --- Cofre (metadados; a senha só sobe, nunca desce) ---
+export const getCofre = () => jsonFetch<EstadoCofre>('/api/cofre');
+export const guardarCredencial = (input: {
+  dominio: string;
+  usuario: string;
+  senha: string;
+  rotulo?: string;
+}) => jsonFetch<CredencialMeta>('/api/cofre', { method: 'POST', body: JSON.stringify(input) });
+export const removerCredencial = (id: string) =>
+  jsonFetch<void>(`/api/cofre/${id}`, { method: 'DELETE' });
+
+// --- Sessões ---
+export const getSessoes = () => jsonFetch<Sessao[]>('/api/sessoes');
+export const criarSessao = (objetivo: string) =>
+  jsonFetch<Sessao>('/api/sessoes', { method: 'POST', body: JSON.stringify({ objetivo }) });
+export const retomarSessao = (id: string) =>
+  jsonFetch<{ ok: boolean }>(`/api/sessoes/${id}/retomar`, { method: 'POST' });
+export const pararSessao = (id: string) =>
+  jsonFetch<{ ok: boolean }>(`/api/sessoes/${id}/parar`, { method: 'POST' });
+export const removerSessao = (id: string) =>
+  jsonFetch<void>(`/api/sessoes/${id}`, { method: 'DELETE' });
+export const responderAprovacao = (
+  sessaoId: string,
+  pedidoId: string,
+  aprovado: boolean,
+  motivo = '',
+) =>
+  jsonFetch<{ ok: boolean }>(`/api/sessoes/${sessaoId}/aprovacao`, {
+    method: 'POST',
+    body: JSON.stringify({ pedidoId, aprovado, motivo }),
+  });
+export const fecharNavegador = () =>
+  jsonFetch<{ ok: boolean }>('/api/sessoes/navegador/fechar', { method: 'POST' });
+
+// --- Saúde ---
+export const getHealth = () => jsonFetch<HealthInfo>('/api/health');
+
+/** Stream ao vivo das sessões. Devolve um "fechar". */
+export function abrirStream(
+  onEvent: (e: SessaoStreamEvent) => void,
+  onStatus?: (conectado: boolean) => void,
+): () => void {
+  const es = new EventSource('/api/sessoes/stream');
+  es.onopen = () => onStatus?.(true);
+  es.onmessage = (m) => {
+    onStatus?.(true);
+    try {
+      onEvent(JSON.parse(m.data) as SessaoStreamEvent);
+    } catch {
+      /* ignora frame malformado */
+    }
+  };
+  // O EventSource reconecta sozinho em erro de rede.
+  es.onerror = () => onStatus?.(false);
+  return () => es.close();
+}

@@ -1,0 +1,7 @@
+node_modules/
+web/dist/
+data/
+perfil-navegador/
+*.tsbuildinfo
+.env
+.DS_Store
