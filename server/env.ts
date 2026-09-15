@@ -15,6 +15,7 @@ export const PATHS = {
   config: join(DATA_DIR, 'config.json'),
   sessoes: join(DATA_DIR, 'sessoes.json'),
   cofre: join(DATA_DIR, 'cofre.json'),
+  tentativas: join(DATA_DIR, 'tentativas.json'),
 } as const;
 
 export const WEB_DIST = join(PROJECT_ROOT, 'web', 'dist');

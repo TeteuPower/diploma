@@ -153,6 +153,21 @@ export function Config({
           </div>
         )}
 
+        <div className="mt-4">
+          <Field
+            label="Tentativas que ele pode abrir por quiz"
+            hint="Padrão 1. Continuar numa tentativa já aberta não conta — o limite é de ABRIR outra. Assim sobra tentativa para você conferir o resultado e refazer se quiser."
+          >
+            <TextInput
+              type="number"
+              min={1}
+              max={10}
+              value={config.tentativasPorQuiz}
+              onChange={(e) => void salvar({ tentativasPorQuiz: Number(e.target.value) })}
+            />
+          </Field>
+        </div>
+
         {config.modo === 'autonomo' && (
           <p className="mt-4 rounded-xl border border-accent-rose/30 bg-accent-rose/[0.07] p-3 text-xs leading-relaxed text-accent-rose/90">
             Sem rede de segurança: uma questão lida errado vira uma resposta enviada, e submissão

@@ -93,6 +93,52 @@ export function coletarInstantaneo(
   }
 
   /**
+   * Visível não é o mesmo que alcançável.
+   *
+   * Um painel deslizante fechado, um menu fora da tela, um modal que o tema
+   * guarda em `left:-9999px` — tudo isso passa em `visivel()` (tem caixa, não
+   * tem display:none) e mesmo assim é impossível clicar: o Playwright rola,
+   * não chega, e fica 20 segundos tentando até estourar. Foi assim que um "X
+   * de fechar" de um painel de anotações queimou um turno inteiro.
+   *
+   * Aqui derrubamos só os casos sem ambiguidade. Conteúdo abaixo da dobra é
+   * alcançável (basta rolar) e continua entrando.
+   */
+  function alcancavel(el: Element): boolean {
+    const r = el.getBoundingClientRect();
+    const doc = document.documentElement;
+
+    // Jogado para fora do documento (o velho truque do left:-9999px).
+    if (r.right + window.scrollX < 0) return false;
+    if (r.bottom + window.scrollY < 0) return false;
+    if (r.left + window.scrollX > doc.scrollWidth) return false;
+
+    // `fixed` fora da janela: rolar a página não move o elemento junto.
+    const meu = window.getComputedStyle(el);
+    if (meu.position === 'fixed') {
+      if (r.right <= 0 || r.bottom <= 0) return false;
+      if (r.left >= window.innerWidth || r.top >= window.innerHeight) return false;
+    }
+
+    // Recortado inteiro por um ancestral com `overflow:hidden` — o painel
+    // fechado. Só `hidden`: `auto`/`scroll` o usuário consegue rolar.
+    let pai = el.parentElement;
+    for (let n = 0; pai && n < 12; n += 1, pai = pai.parentElement) {
+      const est = window.getComputedStyle(pai);
+      const cortaX = est.overflowX === 'hidden';
+      const cortaY = est.overflowY === 'hidden';
+      if (!cortaX && !cortaY) continue;
+
+      const pr = pai.getBoundingClientRect();
+      if (pr.width <= 0 || pr.height <= 0) continue;
+      if (cortaX && (r.right <= pr.left || r.left >= pr.right)) return false;
+      if (cortaY && (r.bottom <= pr.top || r.top >= pr.bottom)) return false;
+    }
+
+    return true;
+  }
+
+  /**
    * O padrão "alternativa como card": o <input type=radio> de verdade é
    * escondido (opacity:0, tamanho zero, display:none) e quem responde ao clique
    * é o <label>/card estilizado por cima. É como quase todo LMS moderno desenha
@@ -293,6 +339,10 @@ export function coletarInstantaneo(
 
     if (interativo || imagem || (blocoTexto && textoProprio)) {
       const nome = nomeDe(el);
+      // Um elemento inalcançável só vale a linha se for texto: como alvo de
+      // clique ele é uma armadilha, e dar ref a ele é convidar o agente a
+      // gastar o turno numa ação que nunca completa.
+      if (interativo && !alcancavel(el)) return;
       if (nome) {
         if (linhas.length >= maxLinhas) {
           truncado = true;

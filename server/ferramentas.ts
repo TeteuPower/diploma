@@ -5,6 +5,8 @@ import * as cofre from './cofre';
 import { avaliar, pedir } from './aprovacao';
 import { appendPasso, getConfig } from './store';
 import type { AcaoSensivel } from '../shared/types';
+import * as tentativas from './tentativas';
+import { log, aviso, erro as logErro, cronometro } from './log';
 
 export const SERVIDOR_MCP = 'lms';
 
@@ -27,6 +29,63 @@ const texto = (t: string): Conteudo => ({ content: [{ type: 'text', text: t }] }
  *    muito diferentes para quem vai receber a nota. Separar dá ao portão de
  *    aprovação um gancho honesto, e obriga o agente a declarar a intenção.
  */
+/**
+ * Resume os argumentos para o log sem despejar um enunciado inteiro nele.
+ * Nenhuma ferramenta recebe senha (o cofre resolve isso por dentro), então não
+ * há segredo a filtrar aqui — mas se um dia houver, é neste ponto que ele seria
+ * cortado.
+ */
+function resumirArgs(args: unknown): Record<string, unknown> {
+  if (!args || typeof args !== 'object') return {};
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
+    out[k] = typeof v === 'string' && v.length > 160 ? `${v.slice(0, 160)}…` : v;
+  }
+  return out;
+}
+
+/**
+ * Envolve `tool()` para que TODA ferramenta registre entrada, saída, duração e
+ * erro — sem precisar lembrar de instrumentar cada handler. É o que me deixa
+ * ler o turno em tempo real e ver onde ele travou: uma ferramenta que demora
+ * 20 s ou devolve instantâneo de 0 caractere aparece sozinha no log.
+ */
+function comLog(
+  nome: string,
+  handler: (args: never) => Promise<Conteudo>,
+): (args: never) => Promise<Conteudo> {
+  return async (args: never) => {
+    const medir = cronometro();
+    log('ferramenta', `→ ${nome}`, resumirArgs(args));
+    try {
+      const r = await handler(args);
+      const blocos = (r?.content ?? []) as Array<{ type: string; text?: string }>;
+      const saida = blocos.map((c) => c.text ?? `[${c.type}]`).join(' ');
+      log('ferramenta', `← ${nome}`, {
+        ms: medir(),
+        chars: saida.length,
+        inicio: saida.slice(0, 200).replace(/\n/g, ' ⏎ '),
+      });
+      return r;
+    } catch (err) {
+      logErro('ferramenta', `✗ ${nome} lançou`, err, { ms: medir() });
+      throw err;
+    }
+  };
+}
+
+/**
+ * Mesma assinatura de `tool()`, só que com o log embutido. O cast existe porque
+ * `tool` é genérica no schema e só queremos interceptar o handler.
+ */
+const ferramenta = ((nome: string, descricao: string, schema: unknown, handler: unknown) =>
+  (tool as unknown as (...a: unknown[]) => unknown)(
+    nome,
+    descricao,
+    schema,
+    comLog(nome, handler as (args: never) => Promise<Conteudo>),
+  )) as unknown as typeof tool;
+
 export function criarServidorLms(sessaoId: string) {
   /** Registra o passo e devolve o instantâneo novo — o agente sempre vê o agora. */
   async function comInstantaneo(resumo: string, ferramenta: string): Promise<Conteudo> {
@@ -43,6 +102,7 @@ export function criarServidorLms(sessaoId: string) {
     executar: () => Promise<Conteudo>,
   ): Promise<Conteudo> {
     const veredito = avaliar(acao);
+    log('portao', 'avaliou', { acao, veredito: veredito.tipo, descricao: descricao.slice(0, 120) });
 
     if (veredito.tipo === 'recusado') {
       await appendPasso(sessaoId, 'recusado', `${descricao} — ${veredito.motivo}`);
@@ -51,6 +111,7 @@ export function criarServidorLms(sessaoId: string) {
 
     if (veredito.tipo === 'precisa-aprovacao') {
       const decisao = await pedir(sessaoId, acao as AcaoSensivel, descricao, detalhe);
+      log('portao', 'dono decidiu', { acao, aprovado: decisao.aprovado, motivo: decisao.motivo });
       if (!decisao.aprovado) {
         return texto(
           `AÇÃO NÃO EXECUTADA — ${decisao.motivo}. ` +
@@ -66,7 +127,7 @@ export function criarServidorLms(sessaoId: string) {
   // Leitura
   // -------------------------------------------------------------------------
 
-  const abrir = tool(
+  const abrir = ferramenta(
     'abrir',
     'Abre o navegador e vai até uma URL do LMS. Aceita caminho relativo (/curso/123) ' +
       'ou URL completa. Só navega dentro do domínio configurado. Devolve o instantâneo da página.',
@@ -87,7 +148,7 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
-  const olhar = tool(
+  const olhar = ferramenta(
     'olhar',
     'Tira um instantâneo do que está na tela agora: a árvore de elementos com os refs ' +
       '(ref=e12) que você usa para agir. Use depois de qualquer mudança que você não causou.',
@@ -106,7 +167,7 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
-  const capturar = tool(
+  const capturar = ferramenta(
     'capturar',
     'Tira uma foto da tela. Use SÓ quando o instantâneo de texto não basta — questão ' +
       'com gráfico, figura, fórmula em imagem. Custa muito mais que `olhar`.',
@@ -127,7 +188,7 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
-  const rolar = tool(
+  const rolar = ferramenta(
     'rolar',
     'Rola a página. Conteúdo que estava fora da tela aparece no próximo instantâneo.',
     { direcao: z.enum(['baixo', 'cima', 'topo', 'fim']) },
@@ -141,7 +202,7 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
-  const voltar = tool(
+  const voltar = ferramenta(
     'voltar',
     'Volta uma página no histórico do navegador.',
     {},
@@ -159,7 +220,7 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
-  const esperar = tool(
+  const esperar = ferramenta(
     'esperar',
     'Espera um texto aparecer na tela (para carregamento lento, vídeo, upload). ' +
       'Devolve se apareceu dentro do prazo.',
@@ -181,7 +242,7 @@ export function criarServidorLms(sessaoId: string) {
   // Ações que mudam a página
   // -------------------------------------------------------------------------
 
-  const clicar = tool(
+  const clicar = ferramenta(
     'clicar',
     'Clica num elemento pelo ref do instantâneo. Para NAVEGAR e INTERAGIR — abrir uma ' +
       'seção, ir para a próxima página, expandir. NÃO use para enviar respostas nem ' +
@@ -205,7 +266,7 @@ export function criarServidorLms(sessaoId: string) {
       }),
   );
 
-  const escrever = tool(
+  const escrever = ferramenta(
     'escrever',
     'Escreve num campo de texto pelo ref. Substitui o conteúdo que estiver lá. ' +
       'Nunca use para senha — use `entrar`.',
@@ -232,7 +293,7 @@ export function criarServidorLms(sessaoId: string) {
       ),
   );
 
-  const escolher = tool(
+  const escolher = ferramenta(
     'escolher',
     'Marca uma alternativa (radio/checkbox) ou escolhe numa lista suspensa.',
     {
@@ -262,7 +323,7 @@ export function criarServidorLms(sessaoId: string) {
   // Ações sensíveis
   // -------------------------------------------------------------------------
 
-  const entrar = tool(
+  const entrar = ferramenta(
     'entrar',
     'Faz login com a credencial guardada no cofre para este domínio. Você NÃO vê a senha ' +
       'e não precisa dela: o servidor digita direto no navegador. Se souber os refs dos ' +
@@ -301,7 +362,7 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
-  const submeter = tool(
+  const submeter = ferramenta(
     'submeter',
     'Envia respostas, finaliza tentativa, confirma entrega — qualquer clique que deixa ' +
       'marca e em geral NÃO dá para desfazer. Descreva em `respostas` exatamente o que ' +
@@ -315,8 +376,25 @@ export function criarServidorLms(sessaoId: string) {
         .string()
         .describe('O conteúdo exato em jogo: as respostas escolhidas, o arquivo, a confirmação'),
     },
-    ({ ref, acao, respostas }) =>
-      portao(acao, `${acao} em ${nav.urlAtual() ?? 'página atual'}`, respostas, async () => {
+    ({ ref, acao, respostas }) => {
+      // A trava de tentativas vem ANTES do portão de aprovação de propósito: se
+      // a resposta é "não pode", não faz sentido acordar o dono para perguntar.
+      if (acao === 'iniciar_tentativa') {
+        const v = tentativas.podeIniciar(nav.urlAtual() ?? '');
+        if (!v.permitido) {
+          aviso('ferramentas', 'iniciar_tentativa barrado pelo limite', {
+            url: nav.urlAtual(), jaFeitas: v.jaFeitas, limite: v.limite,
+          });
+          void appendPasso(sessaoId, 'recusado', `Tentativa barrada: ${v.motivo}`, {
+            ferramenta: 'submeter',
+            url: nav.urlAtual() ?? undefined,
+          });
+          return Promise.resolve(texto(`AÇÃO NÃO EXECUTADA — ${v.motivo}`));
+        }
+        log('ferramentas', 'iniciar_tentativa liberado', { motivo: v.motivo });
+      }
+
+      return portao(acao, `${acao} em ${nav.urlAtual() ?? 'página atual'}`, respostas, async () => {
         try {
           await nav.clicar(ref);
           await appendPasso(sessaoId, 'agiu', `Submeteu (${acao}): ${respostas.slice(0, 200)}`, {
@@ -329,14 +407,15 @@ export function criarServidorLms(sessaoId: string) {
           await appendPasso(sessaoId, 'erro', `Submissão falhou: ${msg}`, { ferramenta: 'submeter' });
           return texto(`ERRO: ${msg}`);
         }
-      }),
+      });
+    },
   );
 
   // -------------------------------------------------------------------------
   // Diálogo com o dono
   // -------------------------------------------------------------------------
 
-  const perguntar = tool(
+  const perguntar = ferramenta(
     'perguntar',
     'Pergunta ao dono quando você está genuinamente travado: captcha, 2FA, questão ' +
       'ambígua, algo que só ele sabe. Bloqueia até ele responder.',
@@ -354,7 +433,7 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
-  const anotar = tool(
+  const anotar = ferramenta(
     'anotar',
     'Registra um raciocínio ou achado na trilha da sessão, para o dono acompanhar. ' +
       'Não age na página. No modo "observar", é aqui que você diz o que faria.',

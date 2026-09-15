@@ -184,6 +184,16 @@ function CartaoSessao({ sessao, onMudou }: { sessao: Sessao; onMudou: () => void
             </div>
           )}
 
+          {/* A instrução inteira, sem corte. No cabeçalho ela é truncada para o
+              cartão caber; se não aparecesse em lugar nenhum, o dono perderia o
+              que ele mesmo pediu — e foi exatamente o que aconteceu. */}
+          <div className="mb-3 rounded-xl border border-white/10 bg-black/25 p-3">
+            <div className="label">Instrução dada</div>
+            <p className="whitespace-pre-wrap text-xs leading-relaxed text-white/70">
+              {sessao.objetivo}
+            </p>
+          </div>
+
           {sessao.urlAtual && (
             <p className="mb-3 truncate font-mono text-[11px] text-white/30" title={sessao.urlAtual}>
               📍 {sessao.urlAtual}

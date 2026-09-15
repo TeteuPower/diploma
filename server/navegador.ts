@@ -1,9 +1,11 @@
 import { chromium } from 'playwright';
-import type { Browser, BrowserContext, Page, Frame } from 'playwright';
+import type { Browser, BrowserContext, Page, Frame, Locator } from 'playwright';
 import { PERFIL_DIR } from './env';
 import { getConfig } from './store';
 import { fonteInstantaneo, ATRIBUTO_REF, type ResultadoInstantaneo } from './instantaneo';
 import { revelarParaNavegador } from './cofre';
+import { log, erro as logErro, cronometro } from './log';
+import { observar } from './tentativas';
 
 /**
  * A camada de navegador. Playwright + Chromium.
@@ -95,6 +97,14 @@ export async function abrir(): Promise<Page> {
   contexto.setDefaultTimeout(timeoutMs);
   contexto.setDefaultNavigationTimeout(timeoutMs * 2);
 
+  // Registro passivo de tentativas. Escutamos a navegação do frame principal em
+  // vez de registrar dentro de `navegar()` porque tentativa quase nunca nasce
+  // de uma URL digitada: nasce de um POST em "Iniciar tentativa" e do redirect
+  // que vem depois. Aqui nada escapa.
+  pagina.on('framenavigated', (f) => {
+    if (f === pagina?.mainFrame()) void observar(f.url());
+  });
+
   // Fechar a janela na mão não pode deixar o servidor achando que ainda há página.
   contexto.on('close', () => {
     contexto = null;
@@ -102,6 +112,7 @@ export async function abrir(): Promise<Page> {
     browser = null;
   });
 
+  log('navegador', 'aberto', { headless, perfilPersistente });
   return pagina;
 }
 
@@ -133,6 +144,7 @@ function exigirPagina(): Page {
  */
 export async function instantaneo(maxLinhas = 400): Promise<string> {
   const page = exigirPagina();
+  const medir = cronometro();
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 8000 });
   } catch {
@@ -176,7 +188,20 @@ export async function instantaneo(maxLinhas = 400): Promise<string> {
     ? `\n\n[instantâneo cortado em ${maxLinhas} linhas — role a página ou entre numa seção]`
     : `\n\n[${total} elementos acionáveis]`;
 
-  return `${cabecalho}\n\n${corpo}${rodape}`;
+  const texto = `${cabecalho}\n\n${corpo}${rodape}`;
+  // Estes números são o termômetro do instantâneo: zero elemento numa página
+  // cheia significa que o filtro está comendo o que devia passar, e `truncado`
+  // explica por que o agente não achou o botão que estava lá embaixo.
+  log('instantaneo', 'coletado', {
+    url: page.url(),
+    elementos: total,
+    linhas: texto.split('\n').length,
+    chars: texto.length,
+    truncado: truncou,
+    frames: frames.length,
+    ms: medir(),
+  });
+  return texto;
 }
 
 /** Descobre a que frame um ref pertence e devolve o seletor dentro dele. */
@@ -209,13 +234,64 @@ export async function navegar(url: string): Promise<void> {
         'Navegação recusada.',
     );
   }
+  const medir = cronometro();
   await page.goto(absoluta, { waitUntil: 'domcontentloaded' });
+  log('navegador', 'navegou', { url: absoluta, ms: medir() });
 }
 
-export async function clicar(ref: string): Promise<void> {
+/**
+ * Clique em três tentativas, da mais honesta para a mais bruta.
+ *
+ * O clique normal do Playwright espera o elemento ficar visível, estável e
+ * dentro do viewport — proteções que existem por bons motivos e que, quando
+ * não dão, dão errado devagar: 20 segundos até estourar, um turno inteiro
+ * gasto. Aqui o prazo é curto e há plano B.
+ *
+ * `force` pula a checagem de acionabilidade mas ainda manda um clique de
+ * verdade do mouse. O `el.click()` do DOM é o último recurso: não simula
+ * mouse, então um widget que escuta mousedown não reage — mas resolve link,
+ * botão e qualquer coisa com listener de `click`.
+ *
+ * Devolve por qual caminho passou, porque isso é informação de diagnóstico:
+ * se tudo estiver caindo em 'dom', o instantâneo está apontando alvos ruins.
+ */
+export type ViaDoClique = 'normal' | 'forcado' | 'dom';
+
+export async function clicar(ref: string): Promise<ViaDoClique> {
   const { frame, seletor } = resolverRef(ref);
-  await frame.locator(seletor).first().click();
-  await assentar();
+  return clicarLocator(frame.locator(seletor).first(), ref);
+}
+
+async function clicarLocator(alvo: Locator, ref: string): Promise<ViaDoClique> {
+  const prazo = Math.min(getConfig().navegador.timeoutMs, 8000);
+  const medir = cronometro();
+
+  try {
+    await alvo.click({ timeout: prazo });
+    await assentar();
+    log('navegador', 'clique ok', { ref, via: 'normal', ms: medir() });
+    return 'normal';
+  } catch (err1) {
+    log('navegador', 'clique normal não deu; tentando forçado', {
+      ref,
+      motivo: (err1 as Error).message?.split('\n')[0],
+    });
+    try {
+      await alvo.click({ timeout: prazo, force: true });
+      await assentar();
+      log('navegador', 'clique ok', { ref, via: 'forcado', ms: medir() });
+      return 'forcado';
+    } catch (err2) {
+      log('navegador', 'clique forçado não deu; tentando via DOM', {
+        ref,
+        motivo: (err2 as Error).message?.split('\n')[0],
+      });
+      await alvo.evaluate((el) => (el as HTMLElement).click());
+      await assentar();
+      log('navegador', 'clique ok', { ref, via: 'dom', ms: medir() });
+      return 'dom';
+    }
+  }
 }
 
 export async function preencher(ref: string, texto: string): Promise<void> {
@@ -261,7 +337,7 @@ export async function marcar(ref: string, marcado: boolean): Promise<void> {
         : null;
       return (inp ?? porFor)?.checked ?? false;
     });
-    if (jaEsta !== marcado) await alvo.click();
+    if (jaEsta !== marcado) await clicarLocator(alvo, ref);
   }
   await assentar();
 }

@@ -117,6 +117,45 @@ quebram isso em silêncio, e as duas já morderam:
   browser. Por isso `fonteInstantaneo()` injeta um shim e **falha alto** se o transpilador passar a
   injetar outro helper, em vez de devolver instantâneo vazio.
 
+## O canal de controle (`ctl`)
+
+A interface é para o dono. Para desenvolver existe [ferramentas/ctl.mjs](ferramentas/ctl.mjs), que
+fala com a **mesma API REST** — sem caminho paralelo, sem estado duplicado, sem furar as travas.
+
+```bash
+node ferramentas/ctl.mjs status              # saúde, config e sessões numa tela
+node ferramentas/ctl.mjs seguir              # log ao vivo (tail colorido)
+node ferramentas/ctl.mjs log 60 portao       # últimas 60 linhas, filtrando
+node ferramentas/ctl.mjs nova "<objetivo>"
+node ferramentas/ctl.mjs passos [id] [n]     # a trilha + o pendente
+node ferramentas/ctl.mjs aprovar | recusar "<motivo>"
+node ferramentas/ctl.mjs parar | retomar
+node ferramentas/ctl.mjs config modo=guiado navegador.headless=false
+node ferramentas/ctl.mjs tentativas [--zerar <quiz>]
+```
+
+O log vai para stdout **e** para `data/diploma.log` (rotaciona em 8 MB). Por que arquivo além do
+stdout: quando uma sessão quebra, a trilha conta o QUE aconteceu, mas consertar exige o erro cru do
+Playwright, o tamanho do instantâneo e quanto cada ação demorou — coisas que não cabem na UI e não
+devem poluir a trilha do dono. `→ ferramenta` / `← ferramenta` com `ms` e `chars` mostram na hora
+qual passo travou e se o instantâneo veio vazio.
+
+Nada de senha no log: `entrar` registra o usuário e o resultado, nunca o segredo.
+
+## O limite de tentativas
+
+Quiz costuma dar poucas tentativas e gastar uma não tem desfazer. `tentativasPorQuiz` (padrão **1**)
+é o teto de quantas o agente pode **abrir**; continuar numa tentativa já aberta não conta.
+
+[server/tentativas.ts](server/tentativas.ts) mantém um registro persistido por quiz, alimentado
+**passivamente** por um listener de `framenavigated` — não por `navegar()`, porque tentativa quase
+nunca nasce de URL digitada: nasce do POST em "Iniciar tentativa" e do redirect seguinte. Por ser
+persistido, ele sobrevive a reinício, que é a memória que o agente não tem: sozinho ele não sabe que
+já abriu aquele quiz numa sessão que morreu no meio.
+
+A checagem roda **antes** do portão de aprovação: se a resposta é "não pode", não faz sentido acordar
+o dono para perguntar.
+
 ## Como rodar / validar
 
 - `npm install` e `npm run navegador` (baixa o Chromium) — uma vez.

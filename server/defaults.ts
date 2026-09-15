@@ -17,6 +17,7 @@ export const DEFAULT_CONFIG: DiplomaConfig = {
     maxPassos: 80,
     timeoutAprovacaoS: 600,
   },
+  tentativasPorQuiz: 1,
   modelo: 'default',
   esforco: 'medium',
   instrucoes: '',

@@ -5,16 +5,19 @@ import { PORT, WEB_DIST, PROJECT_ROOT, modoTravadoPorEnv, hasApiKeyEnv } from '.
 import { initStore, recuperarOrfas, getConfig } from './store';
 import { initCofre, disponivel as cofreDisponivel, total as totalCredenciais } from './cofre';
 import { limparPendentes } from './aprovacao';
+import { initTentativas } from './tentativas';
 import * as nav from './navegador';
 import './sse';
 import { configRouter } from './routes/config';
 import { cofreRouter } from './routes/cofre';
 import { sessoesRouter } from './routes/sessoes';
+import { tentativasRouter } from './routes/tentativas';
 import { healthRouter } from './routes/health';
 
 async function main() {
   await initStore();
   await initCofre();
+  await initTentativas();
   limparPendentes();
   const orfas = await recuperarOrfas();
 
@@ -24,6 +27,7 @@ async function main() {
   app.use('/api/config', configRouter);
   app.use('/api/cofre', cofreRouter);
   app.use('/api/sessoes', sessoesRouter);
+  app.use('/api/tentativas', tentativasRouter);
   app.use('/api/health', healthRouter);
 
   app.use('/api', (_req, res) => res.status(404).json({ error: 'rota não encontrada' }));

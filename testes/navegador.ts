@@ -47,6 +47,16 @@ const QUIZ = `<!doctype html>
     <label class="card" for="q4c">Para cifrar o tráfego de rede</label>
     <input type="radio" name="q4" value="c" id="q4c" style="display:none">
   </fieldset>
+  <!-- Inalcançáveis: têm caixa e passam em "visível", mas clicar neles trava o
+       Playwright até estourar o prazo. Foi o que queimou um turno num "X" de
+       painel de anotações fechado. -->
+  <a href="#" id="fora-esquerda" style="position:absolute;left:-9999px">Fechar painel lateral</a>
+  <div style="overflow:hidden;width:200px;height:40px;position:relative">
+    <a href="#" id="recortado" style="position:absolute;left:400px">Botao do painel deslizante</a>
+  </div>
+  <a href="#" id="fixo-fora" style="position:fixed;left:-500px;top:10px">Menu fixo escondido</a>
+  <a href="#" id="alcancavel-abaixo">Link la embaixo mas alcancavel</a>
+
   <p style="display:none">Este texto invisível NÃO pode aparecer</p>
   <iframe src="/embutido" title="Conteúdo SCORM" width="600" height="200"></iframe>
 </body></html>`;
@@ -190,6 +200,15 @@ try {
 
   // O token escondido não pode virar alternativa fantasma.
   checa('NÃO inventa ref para o token escondido sem fachada', !/csrf/i.test(cards));
+
+  // --- Inalcançáveis não podem virar alvo de clique ---
+  console.log('\nElementos inalcançáveis:');
+  checa('OMITE link jogado para fora do documento', !cards.includes('Fechar painel lateral'));
+  checa('OMITE link recortado por overflow:hidden', !cards.includes('Botao do painel deslizante'));
+  checa('OMITE elemento fixed fora da janela', !cards.includes('Menu fixo escondido'));
+  // O contrapeso: filtrar demais seria pior que filtrar de menos. Conteúdo
+  // abaixo da dobra é alcançável (basta rolar) e tem que continuar entrando.
+  checa('MANTÉM link normal alcançável', cards.includes('Link la embaixo mas alcancavel'));
 
   // --- A senha não pode vazar ---
   console.log('\nVazamento de senha no instantâneo:');

@@ -63,6 +63,12 @@ export interface DiplomaConfig {
   navegador: ConfigNavegador;
   modelo: ModelChoice;
   esforco: EffortChoice;
+  /**
+   * Quantas tentativas o agente pode ABRIR por quiz. Padrão 1: o dono quer ver
+   * o resultado no fim e ainda ter tentativa sobrando. Continuar numa tentativa
+   * já aberta não conta — o limite é de abrir, não de trabalhar.
+   */
+  tentativasPorQuiz: number;
   /** Instruções livres que entram no system prompt (regras da disciplina etc). */
   instrucoes: string;
   navOrientation: NavOrientation;
