@@ -14,6 +14,42 @@ import { log, cronometro } from './log';
  * O caminho passa por `resolverCaminho`, então origem e destino continuam
  * presos a `trabalhos/` — compactar não é uma porta dos fundos para ler o disco.
  */
+/**
+ * Lista o que está DENTRO de um ZIP já gerado.
+ *
+ * Confiar em "o compactador filtrou direito" não é conferir. Isto abre o
+ * arquivo e lê o índice — é a prova de que nenhum recado interno viajou junto,
+ * e é o que o painel de entrega mostra ao dono antes de ele enviar.
+ */
+export async function listarZip(zipRelativo: string): Promise<string[]> {
+  const caminho = resolverCaminho(zipRelativo);
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [IO.Compression.ZipFile]::OpenRead('${caminho.replace(/'/g, "''")}')
+try { $zip.Entries | ForEach-Object { $_.FullName } } finally { $zip.Dispose() }
+`;
+  return new Promise<string[]>((resolve) => {
+    const ps = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+      { windowsHide: true },
+    );
+    let saida = '';
+    ps.stdout.on('data', (d) => (saida += d.toString('utf8')));
+    // Um ZIP ilegível não derruba o painel: devolve vazio e a UI mostra isso.
+    ps.on('error', () => resolve([]));
+    ps.on('close', () =>
+      resolve(
+        saida
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean),
+      ),
+    );
+  });
+}
+
 export async function compactar(
   pastaRelativa: string,
   zipRelativo: string,

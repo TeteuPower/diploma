@@ -67,6 +67,17 @@ Cada elemento acionável ganha um `ref`, e é por ele que o agente age. Custa um
 uma imagem, não depende de coordenada e funciona dentro de iframe — que é onde a maior parte do
 conteúdo de LMS mora (SCORM, H5P, vídeo). Screenshot fica para o que sobra: questão em gráfico.
 
+## A aba Entrega
+
+Quando ele termina de produzir os trabalhos, a aba **Entrega** mostra o que a aplicação conferiu
+**no disco** — não o que o agente disse que fez:
+
+- cada atividade, seus arquivos e o pacote gerado
+- se o PDF é um PDF de verdade (assinatura conferida, não a extensão)
+- **o que está dentro de cada ZIP**, para você ver que nenhum recado interno viajou junto
+- os trechos que parecem recado ao dono e ainda estão dentro de um arquivo de entrega
+- e, separado de tudo isso, o que depende de você — que o agente guarda em `_notas/`, fora da entrega
+
 ## Validar
 
 ```bash

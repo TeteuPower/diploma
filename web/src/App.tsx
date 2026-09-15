@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { DiplomaConfig, EstadoCofre, HealthInfo, Sessao } from '@shared/types';
 import { Layout, PAGES, type Page } from './components/Layout';
 import { Painel } from './pages/Painel';
+import { Entrega } from './pages/Entrega';
 import { Cofre } from './pages/Cofre';
 import { Config } from './pages/Config';
 import { getConfig, getCofre, getHealth, getSessoes, abrirStream } from './api';
@@ -121,6 +122,7 @@ export function App() {
       {page === 'painel' && (
         <Painel sessoes={sessoes} config={config} onMudou={recarregarSessoes} />
       )}
+      {page === 'entrega' && <Entrega />}
       {page === 'cofre' && (
         <Cofre
           estado={cofre}

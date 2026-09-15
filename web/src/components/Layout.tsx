@@ -2,10 +2,11 @@ import type { ReactNode } from 'react';
 import type { HealthInfo, ModoAutonomia } from '@shared/types';
 import { CORES_MODO, ROTULO_MODO } from '../lib/modo';
 
-export type Page = 'painel' | 'cofre' | 'config';
+export type Page = 'painel' | 'entrega' | 'cofre' | 'config';
 
 export const PAGES: { id: Page; label: string; icon: string; subtitle: string }[] = [
   { id: 'painel', label: 'Painel', icon: '🎓', subtitle: 'Sessões, trilha ao vivo e aprovações' },
+  { id: 'entrega', label: 'Entrega', icon: '📦', subtitle: 'O que a aplicação conferiu no disco' },
   { id: 'cofre', label: 'Cofre', icon: '🔒', subtitle: 'Credenciais cifradas pelo Windows' },
   { id: 'config', label: 'Configuração', icon: '⚙️', subtitle: 'Domínio, autonomia e navegador' },
 ];

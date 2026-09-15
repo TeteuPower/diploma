@@ -5,6 +5,7 @@ import type {
   Sessao,
   HealthInfo,
   SessaoStreamEvent,
+  PainelEntrega,
 } from '@shared/types';
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
@@ -58,6 +59,9 @@ export const responderAprovacao = (
   });
 export const fecharNavegador = () =>
   jsonFetch<{ ok: boolean }>('/api/sessoes/navegador/fechar', { method: 'POST' });
+
+// --- Entrega (conferido no disco, não relatado pelo agente) ---
+export const getEntrega = () => jsonFetch<PainelEntrega>('/api/entrega');
 
 // --- Saúde ---
 export const getHealth = () => jsonFetch<HealthInfo>('/api/health');

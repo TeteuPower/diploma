@@ -182,3 +182,44 @@ export interface HealthInfo {
   navegador: { instalado: boolean; aberto: boolean };
   cwd: string;
 }
+
+// -----------------------------------------------------------------------------
+// Painel de entrega — o que a aplicação confere no disco, não o que o agente diz.
+// -----------------------------------------------------------------------------
+
+export interface Suspeita {
+  caminho: string;
+  linha: number;
+  trecho: string;
+}
+
+export interface ArquivoEntrega {
+  caminho: string;
+  bytes: number;
+  /** Assinatura conferida byte a byte. Extensão .pdf não prova nada. */
+  pdfValido?: boolean;
+}
+
+export interface PacoteZip {
+  caminho: string;
+  bytes: number;
+  itens: string[];
+  /** Recado interno que vazou para dentro do pacote. Tem que estar vazio. */
+  itensInternos: string[];
+}
+
+export interface Atividade {
+  pasta: string;
+  arquivos: ArquivoEntrega[];
+  bytes: number;
+  zip: PacoteZip | null;
+  pdfs: ArquivoEntrega[];
+  suspeitas: Suspeita[];
+}
+
+export interface PainelEntrega {
+  atividades: Atividade[];
+  notas: { atividade: string; conteudo: string }[];
+  totais: { atividades: number; arquivos: number; bytes: number; zips: number; suspeitas: number };
+  geradoEm: string;
+}

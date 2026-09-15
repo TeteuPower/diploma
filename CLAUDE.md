@@ -200,6 +200,19 @@ do grupo (código de colega, print, nomes, link de repo). Entregável honesto co
 vale mais que um completo com dado inventado: o dono precisa saber onde olhar antes de pôr o nome
 dele naquilo.
 
+### O painel de Entrega
+
+[server/entrega.ts](server/entrega.ts) + a página **Entrega** na UI existem para separar duas coisas
+que o dono precisa distinguir antes de enviar ao professor:
+
+- **O "Relato final" no Painel** é o agente contando, em prosa, o que acha que fez. É julgamento.
+- **A página Entrega** é a aplicação lendo o disco. É fato: quais arquivos existem, se o `.pdf` é
+  mesmo um PDF (assinatura `%PDF-` conferida byte a byte, não pela extensão), o que está **dentro**
+  do ZIP (`listarZip` abre o arquivo e lê o índice — confiar que o compactador filtrou direito não é
+  conferir), e se sobrou recado interno na entrega.
+
+Regra de ouro nº 8 aplicada: nada nesse painel é inferido do que o agente disse.
+
 ## O limite de tentativas
 
 Quiz costuma dar poucas tentativas e gastar uma não tem desfazer. `tentativasPorQuiz` (padrão **1**)
