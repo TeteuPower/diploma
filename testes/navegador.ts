@@ -57,6 +57,16 @@ const QUIZ = `<!doctype html>
   <a href="#" id="fixo-fora" style="position:fixed;left:-500px;top:10px">Menu fixo escondido</a>
   <a href="#" id="alcancavel-abaixo">Link la embaixo mas alcancavel</a>
 
+  <!-- O botão que só o CSS declara. Caso real: o "ENVIAR TUDO E TERMINAR" do
+       LMS é um elemento estilizado, sem tag de botão, sem role e sem onclick
+       como atributo — o listener veio de addEventListener, invisível ao DOM.
+       Some do instantâneo no pior lugar possível para sumir. -->
+  <div id="botao-css" style="cursor:pointer;padding:8px;background:#e91e63">ENVIAR TUDO E TERMINAR</div>
+
+  <!-- Guarda contra o efeito colateral: cursor:pointer é herdado, então o span
+       dentro do button também o tem. O botão não pode ganhar dois refs. -->
+  <button id="btn-com-span" type="button"><span>Salvar rascunho</span></button>
+
   <p style="display:none">Este texto invisível NÃO pode aparecer</p>
   <iframe src="/embutido" title="Conteúdo SCORM" width="600" height="200"></iframe>
 </body></html>`;
@@ -200,6 +210,21 @@ try {
 
   // O token escondido não pode virar alternativa fantasma.
   checa('NÃO inventa ref para o token escondido sem fachada', !/csrf/i.test(cards));
+
+  // --- O botão que só o CSS declara ---
+  console.log('\nClicável detectado só pelo cursor:');
+  const refBotaoCss = /clicavel "ENVIAR TUDO E TERMINAR"[^\n]*ref=(e\d+)/.exec(cards)?.[1];
+  checa('acha o div com cursor:pointer', Boolean(refBotaoCss), refBotaoCss ?? 'sem ref');
+  checa('reporta papel "clicavel", sinalizando heurística', cards.includes('clicavel "ENVIAR'));
+  if (refBotaoCss) {
+    let clicou = true;
+    await nav.clicar(refBotaoCss).catch(() => { clicou = false; });
+    checa('consegue clicar nele', clicou);
+  }
+  // O contrapeso: herdar pointer não pode duplicar o alvo.
+  const ocorrenciasSalvar = (cards.match(/"Salvar rascunho"/g) ?? []).length;
+  checa('botão com span dentro sai UMA vez só', ocorrenciasSalvar === 1, `${ocorrenciasSalvar}x`);
+  checa('e sai como botao, não como clicavel', /botao "Salvar rascunho"/.test(cards));
 
   // --- Inalcançáveis não podem virar alvo de clique ---
   console.log('\nElementos inalcançáveis:');

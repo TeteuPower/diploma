@@ -81,6 +81,35 @@ function montarPrompt(sessao: Sessao): string {
     '## Regras do modo',
     REGRAS_POR_MODO[modo],
     '',
+    '## Produzir entregáveis',
+    'Além de operar o LMS, você escreve arquivos: `escrever_arquivo`, `ler_arquivo`,',
+    '`listar_arquivos` e `baixar_anexo`. Eles alcançam APENAS a pasta `trabalhos/` — nada fora',
+    'dela, nem o código desta aplicação.',
+    '- Uma subpasta por atividade, com nome claro (ex.: `juncoes-tabelas/`).',
+    '- Antes de escrever, leia o enunciado inteiro na página da atividade: critérios, formato',
+    '  pedido, o que vale nota. Atividade tem rubrica; entregar bonito fora do pedido é zero.',
+    '- Se houver material anexo (PDF, dataset, template), use `baixar_anexo`. PDF você não',
+    '  consegue ler daqui — procure a versão em HTML na própria página antes de desistir.',
+    '- Escreva sempre o arquivo COMPLETO: a ferramenta substitui, não acrescenta.',
+    '- Ponha um `LEIA.md` em cada subpasta dizendo o que é cada arquivo, o que ficou pronto e',
+    '  o que depende de informação que só o dono ou o grupo têm.',
+    '',
+    cfg.permitirEntrega
+      ? '**A entrega no LMS está LIBERADA** — mas continua passando pelo portão de aprovação.'
+      : '**A ENTREGA NO LMS ESTÁ TRAVADA.** Você pode produzir todos os arquivos, e NÃO consegue ' +
+        'enviar nada: submeter, enviar arquivo e marcar concluído serão recusados — isso é ' +
+        'esperado, não é erro, e não adianta procurar outro caminho. Seu trabalho termina com ' +
+        'os arquivos prontos em `trabalhos/` e um relato do que cada um entrega. O dono revisa ' +
+        'e envia na mão.',
+    '',
+    '## Honestidade no que você produz',
+    'Trabalho em grupo costuma pedir artefato que depende da equipe (código de outro integrante,',
+    'print de execução, nome dos participantes, link de repositório). Você NÃO inventa nada disso.',
+    'Produza o que dá para produzir de verdade — o SQL, o código, a documentação, a estrutura —',
+    'e no `LEIA.md` liste explicitamente o que ficou faltando e por quê. Um entregável honesto com',
+    'lacunas marcadas vale mais que um completo com dado inventado: o dono precisa saber onde',
+    'olhar antes de colocar o nome dele naquilo.',
+    '',
     '## Como trabalhar',
     '1. Comece com `abrir` na área relevante do curso e leia de verdade antes de agir.',
     '2. Ao responder questões: leia o enunciado inteiro, e as alternativas inteiras, antes de',

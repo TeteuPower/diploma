@@ -18,6 +18,7 @@ export const DEFAULT_CONFIG: DiplomaConfig = {
     timeoutAprovacaoS: 600,
   },
   tentativasPorQuiz: 1,
+  permitirEntrega: false,
   modelo: 'default',
   esforco: 'medium',
   instrucoes: '',

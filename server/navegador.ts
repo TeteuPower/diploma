@@ -369,6 +369,49 @@ export async function esperarTexto(texto: string, segundos: number): Promise<boo
   }
 }
 
+/**
+ * Baixa um arquivo do LMS (enunciado em PDF, dataset, template).
+ *
+ * Usa o `request` do contexto do Playwright em vez de um fetch solto porque
+ * ele compartilha os cookies da sessão logada — anexo de LMS quase sempre está
+ * atrás de autenticação, e um fetch anônimo traria a página de login em vez do
+ * arquivo. A fronteira de domínio vale aqui igual: não se baixa de fora do alvo.
+ */
+export async function baixar(url: string): Promise<{ dados: Buffer; tipo: string; nome: string }> {
+  const page = await abrir();
+  const base = getConfig().alvo.urlBase.trim();
+  const absoluta = url.includes('://')
+    ? url
+    : new URL(url, base.includes('://') ? base : `https://${base}`).toString();
+
+  if (!dentroDoAlvo(absoluta)) {
+    throw new Error(`fora do domínio apontado: ${absoluta}. Download recusado.`);
+  }
+
+  const medir = cronometro();
+  const resposta = await page.context().request.get(absoluta);
+  if (!resposta.ok()) {
+    throw new Error(`o servidor respondeu ${resposta.status()} ao baixar ${absoluta}`);
+  }
+  const dados = Buffer.from(await resposta.body());
+  const tipo = resposta.headers()['content-type'] ?? 'application/octet-stream';
+
+  // Nome: primeiro o que o servidor manda, senão o fim da URL.
+  const disp = resposta.headers()['content-disposition'] ?? '';
+  const doHeader = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp)?.[1];
+  const daUrl = decodeURIComponent(new URL(absoluta).pathname.split('/').pop() || 'anexo');
+  const nome = (doHeader ?? daUrl).trim() || 'anexo';
+
+  log('navegador', 'baixou', { url: absoluta, bytes: dados.byteLength, tipo, nome, ms: medir() });
+  return { dados, tipo, nome };
+}
+
+/** O href de um ref, para saber o que um link baixaria antes de baixar. */
+export async function hrefDe(ref: string): Promise<string | null> {
+  const { frame, seletor } = resolverRef(ref);
+  return frame.locator(seletor).first().getAttribute('href');
+}
+
 /** Screenshot em JPEG base64 — o recurso para questão em figura/gráfico. */
 export async function captura(): Promise<string> {
   const page = exigirPagina();

@@ -226,6 +226,38 @@ export function coletarInstantaneo(
     return limpar(he.textContent);
   }
 
+  /**
+   * O botão que só o CSS declara.
+   *
+   * Um LMS real escondeu do agente justamente o "ENVIAR TUDO E TERMINAR": um
+   * elemento estilizado, sem tag de botão, sem `role`, sem atributo `onclick`
+   * (o listener veio de `addEventListener`, que página nenhuma consegue
+   * enxergar por dentro) e sem controle escondido atrás. Passava em nenhuma das
+   * regras e sumia — no pior lugar possível para sumir.
+   *
+   * `cursor: pointer` é o sinal que sobra, e não é um palpite: é literalmente
+   * como o site avisa o humano de que aquilo se clica. Pegamos o elemento MAIS
+   * INTERNO com esse cursor — clicar nele funciona de qualquer forma, porque o
+   * evento sobe — e assim um card inteiro não vira dez linhas repetidas.
+   */
+  function pareceClicavelPeloEstilo(el: Element): boolean {
+    if (window.getComputedStyle(el).cursor !== 'pointer') return false;
+
+    // `cursor: pointer` é herdado, então o <span> dentro de um <button> também
+    // o tem. Sem esta guarda, o botão ganharia dois refs — um pela tag, outro
+    // pelo estilo — e o agente veria a mesma coisa duas vezes com nomes iguais.
+    if (el.parentElement?.closest('a[href], button, label, select, textarea, summary, [role]')) {
+      return false;
+    }
+
+    // Só o mais interno: se um filho também é "pointer", o alvo é ele.
+    const filhos = Array.prototype.slice.call(el.children) as Element[];
+    for (const f of filhos) {
+      if (window.getComputedStyle(f).cursor === 'pointer') return false;
+    }
+    return true;
+  }
+
   function ehInterativo(el: Element): boolean {
     const he = el as HTMLElement;
     if (INTERATIVOS.has(he.tagName)) {
@@ -238,6 +270,7 @@ export function coletarInstantaneo(
     if (he.isContentEditable) return true;
     const ti = he.getAttribute('tabindex');
     if (ti !== null && Number(ti) >= 0) return true;
+    if (pareceClicavelPeloEstilo(he)) return true;
     return false;
   }
 
@@ -267,7 +300,10 @@ export function coletarInstantaneo(
       case 'LI': return 'item';
       case 'TD': case 'TH': return 'celula';
       case 'IMG': return 'imagem';
-      default: return 'texto';
+      default:
+        // Detectado só pelo cursor: o agente precisa saber que dá para clicar,
+        // e também que a certeza aqui é menor que num <button> de verdade.
+        return pareceClicavelPeloEstilo(he) ? 'clicavel' : 'texto';
     }
   }
 
@@ -311,7 +347,14 @@ export function coletarInstantaneo(
   let contador = 0;
   let truncado = false;
 
-  function visitar(el: Element, profundidade: number): void {
+  /**
+   * `nomeInterativoAcima` carrega o rótulo do elemento acionável mais próximo
+   * acima. Serve para não repetir o mesmo texto duas vezes: o rótulo de um
+   * <button><span>Salvar</span></button> vem do span, então emitir o span
+   * outra vez como texto dá ao agente duas linhas "Salvar" — uma acionável e
+   * outra não — e ele perde tempo decidindo qual é a de verdade.
+   */
+  function visitar(el: Element, profundidade: number, nomeInterativoAcima: string): void {
     if (truncado) return;
     if (IGNORAR.has(el.tagName)) return;
     if (!visivel(el)) return;
@@ -337,12 +380,23 @@ export function coletarInstantaneo(
 
     let emitiu = false;
 
+    let nomeParaFilhos = nomeInterativoAcima;
+
     if (interativo || imagem || (blocoTexto && textoProprio)) {
       const nome = nomeDe(el);
       // Um elemento inalcançável só vale a linha se for texto: como alvo de
       // clique ele é uma armadilha, e dar ref a ele é convidar o agente a
       // gastar o turno numa ação que nunca completa.
       if (interativo && !alcancavel(el)) return;
+      // Texto que já virou o rótulo de um acionável acima não se repete.
+      const jaDito =
+        !interativo && !imagem && nome.length > 0 && nomeInterativoAcima.includes(nome);
+      if (jaDito) {
+        const filhosDitos = Array.prototype.slice.call(el.children) as Element[];
+        for (const f of filhosDitos) visitar(f, profundidade, nomeInterativoAcima);
+        return;
+      }
+      if (interativo) nomeParaFilhos = nome;
       if (nome) {
         if (linhas.length >= maxLinhas) {
           truncado = true;
@@ -389,11 +443,11 @@ export function coletarInstantaneo(
 
     const filhos = Array.prototype.slice.call(el.children) as Element[];
     for (const filho of filhos) {
-      visitar(filho, emitiu ? profundidade + 1 : profundidade);
+      visitar(filho, emitiu ? profundidade + 1 : profundidade, nomeParaFilhos);
     }
   }
 
-  if (document.body) visitar(document.body, 0);
+  if (document.body) visitar(document.body, 0, '');
 
   return { linhas: linhas.join('\n'), totalElementos: contador, truncado };
 }

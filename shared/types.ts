@@ -69,6 +69,13 @@ export interface DiplomaConfig {
    * já aberta não conta — o limite é de abrir, não de trabalhar.
    */
   tentativasPorQuiz: number;
+  /**
+   * Trava dura de entrega. Com false, o agente PODE produzir os arquivos mas
+   * NÃO consegue enviar nada ao LMS: submeter, enviar arquivo e marcar
+   * concluído são recusados no ponto de execução, não só no prompt. Começa
+   * desligada de propósito — entregar é decisão do dono, e é irreversível.
+   */
+  permitirEntrega: boolean;
   /** Instruções livres que entram no system prompt (regras da disciplina etc). */
   instrucoes: string;
   navOrientation: NavOrientation;

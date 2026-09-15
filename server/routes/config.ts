@@ -47,6 +47,7 @@ function limpar(bruto: unknown): Partial<DiplomaConfig> {
   if (typeof b.tentativasPorQuiz === 'number' && Number.isFinite(b.tentativasPorQuiz)) {
     out.tentativasPorQuiz = Math.min(10, Math.max(1, Math.round(b.tentativasPorQuiz)));
   }
+  if (typeof b.permitirEntrega === 'boolean') out.permitirEntrega = b.permitirEntrega;
   if (typeof b.modelo === 'string') out.modelo = b.modelo as DiplomaConfig['modelo'];
   if (b.esforco === 'low' || b.esforco === 'medium' || b.esforco === 'high') out.esforco = b.esforco;
   if (typeof b.instrucoes === 'string') out.instrucoes = b.instrucoes.slice(0, 8000);

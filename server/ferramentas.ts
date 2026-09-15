@@ -6,6 +6,7 @@ import { avaliar, pedir } from './aprovacao';
 import { appendPasso, getConfig } from './store';
 import type { AcaoSensivel } from '../shared/types';
 import * as tentativas from './tentativas';
+import * as trabalhos from './trabalhos';
 import { log, aviso, erro as logErro, cronometro } from './log';
 
 export const SERVIDOR_MCP = 'lms';
@@ -101,6 +102,20 @@ export function criarServidorLms(sessaoId: string) {
     detalhe: string,
     executar: () => Promise<Conteudo>,
   ): Promise<Conteudo> {
+    // A trava de entrega vem primeiro e não negocia: com ela desligada, nada
+    // sai desta máquina para o LMS. Perguntar ao dono seria perder o ponto —
+    // ele já respondeu quando deixou a trava fechada.
+    const ENTREGA: AcaoSensivel[] = ['submeter', 'enviar_arquivo', 'marcar_concluido'];
+    if (ENTREGA.includes(acao as AcaoSensivel) && !getConfig().permitirEntrega) {
+      const motivo =
+        'a trava de entrega está fechada (permitirEntrega=false): produzir arquivo pode, ' +
+        'enviar para o LMS não. Termine os arquivos em trabalhos/ e relate — o dono revisa ' +
+        'e entrega na mão.';
+      aviso('portao', 'entrega bloqueada pela trava', { acao, url: nav.urlAtual() });
+      await appendPasso(sessaoId, 'recusado', `${descricao} — ${motivo}`);
+      return texto(`AÇÃO NÃO EXECUTADA. ${motivo}`);
+    }
+
     const veredito = avaliar(acao);
     log('portao', 'avaliou', { acao, veredito: veredito.tipo, descricao: descricao.slice(0, 120) });
 
@@ -266,7 +281,7 @@ export function criarServidorLms(sessaoId: string) {
       }),
   );
 
-  const escrever = ferramenta(
+  const escreverCampo = ferramenta(
     'escrever',
     'Escreve num campo de texto pelo ref. Substitui o conteúdo que estiver lá. ' +
       'Nunca use para senha — use `entrar`.',
@@ -412,6 +427,105 @@ export function criarServidorLms(sessaoId: string) {
   );
 
   // -------------------------------------------------------------------------
+  // Produção dos entregáveis
+  // -------------------------------------------------------------------------
+
+  const escrever = ferramenta(
+    'escrever_arquivo',
+    'Cria ou substitui um arquivo do trabalho. O caminho é relativo à pasta trabalhos/ ' +
+      'e você NÃO alcança nada fora dela. Use uma subpasta por atividade ' +
+      '(ex.: "juncoes-tabelas/consultas.sql"). Escreva o arquivo inteiro: isto substitui, ' +
+      'não acrescenta.',
+    {
+      caminho: z.string().describe('Relativo a trabalhos/, ex.: fintech-bd/README.md'),
+      conteudo: z.string().describe('O conteúdo completo do arquivo'),
+      porque: z.string().describe('O que este arquivo entrega da atividade'),
+    },
+    async ({ caminho, conteudo, porque }) => {
+      try {
+        const { bytes } = await trabalhos.escrever(caminho, conteudo);
+        await appendPasso(sessaoId, 'agiu', `Escreveu ${caminho} (${bytes} bytes) — ${porque}`, {
+          ferramenta: 'escrever_arquivo',
+        });
+        return texto(`gravado: trabalhos/${caminho} (${bytes} bytes)`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await appendPasso(sessaoId, 'erro', `Falha ao escrever ${caminho}: ${msg}`, {
+          ferramenta: 'escrever_arquivo',
+        });
+        return texto(`ERRO: ${msg}`);
+      }
+    },
+  );
+
+  const lerArquivo = ferramenta(
+    'ler_arquivo',
+    'Lê um arquivo que você já criou em trabalhos/. Use antes de reescrever, para não ' +
+      'perder o que já estava lá.',
+    { caminho: z.string() },
+    async ({ caminho }) => {
+      try {
+        return texto(await trabalhos.ler(caminho));
+      } catch (err) {
+        return texto(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
+  const listarArquivos = ferramenta(
+    'listar_arquivos',
+    'Lista o que já existe em trabalhos/, com tamanho. Use para saber onde você parou.',
+    { subpasta: z.string().optional().describe('Limita a uma subpasta') },
+    async ({ subpasta }) => {
+      try {
+        const itens = await trabalhos.listar(subpasta);
+        if (!itens.length) return texto('(nada em trabalhos/ ainda)');
+        return texto(itens.map((i) => `${String(i.bytes).padStart(8)}  ${i.caminho}`).join('\n'));
+      } catch (err) {
+        return texto(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
+  const baixarAnexo = ferramenta(
+    'baixar_anexo',
+    'Baixa um arquivo do LMS (enunciado em PDF, dataset, template) para dentro de ' +
+      'trabalhos/. Passe o ref do link OU a URL. Use quando a atividade tiver material ' +
+      'anexado que você precisa ler para entregar certo.',
+    {
+      ref: z.string().optional().describe('ref do link no instantâneo'),
+      url: z.string().optional().describe('ou a URL direta'),
+      destino: z.string().describe('Onde salvar, ex.: juncoes-tabelas/enunciado.pdf'),
+    },
+    async ({ ref, url, destino }) => {
+      try {
+        let alvo = url;
+        if (!alvo && ref) alvo = (await nav.hrefDe(ref)) ?? undefined;
+        if (!alvo) return texto('ERRO: informe `ref` de um link com href, ou `url`.');
+
+        const { dados, tipo, nome } = await nav.baixar(alvo);
+        const { bytes } = await trabalhos.gravarBinario(destino, dados);
+        await appendPasso(sessaoId, 'agiu', `Baixou "${nome}" para ${destino} (${bytes} bytes)`, {
+          ferramenta: 'baixar_anexo',
+        });
+        return texto(
+          `baixado: trabalhos/${destino} (${bytes} bytes, ${tipo}).\n` +
+            (tipo.includes('text') || tipo.includes('json')
+              ? 'É texto — use `ler_arquivo` para ver o conteúdo.'
+              : 'É binário: você não consegue ler o conteúdo daqui. Se for o enunciado, ' +
+                'procure a versão em HTML na própria página do LMS.'),
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await appendPasso(sessaoId, 'erro', `Falha ao baixar para ${destino}: ${msg}`, {
+          ferramenta: 'baixar_anexo',
+        });
+        return texto(`ERRO: ${msg}`);
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // Diálogo com o dono
   // -------------------------------------------------------------------------
 
@@ -449,8 +563,9 @@ export function criarServidorLms(sessaoId: string) {
     version: '1.0.0',
     tools: [
       abrir, olhar, capturar, rolar, voltar, esperar,
-      clicar, escrever, escolher,
+      clicar, escreverCampo, escolher,
       entrar, submeter,
+      escrever, lerArquivo, listarArquivos, baixarAnexo,
       perguntar, anotar,
     ],
   });
@@ -461,5 +576,6 @@ export const FERRAMENTAS_LMS = [
   'abrir', 'olhar', 'capturar', 'rolar', 'voltar', 'esperar',
   'clicar', 'escrever', 'escolher',
   'entrar', 'submeter',
+  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'baixar_anexo',
   'perguntar', 'anotar',
 ].map((n) => `mcp__${SERVIDOR_MCP}__${n}`);

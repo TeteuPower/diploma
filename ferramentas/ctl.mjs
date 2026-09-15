@@ -231,6 +231,20 @@ try {
       break;
     }
 
+    case 'olhar': {
+      // O instantâneo cru da página aberta — o que o agente está vendo agora.
+      const r = await fetch(`${BASE}/api/debug/instantaneo`);
+      const t = await r.text();
+      if (resto[0]) {
+        const f = resto[0].toLowerCase();
+        const casaram = t.split('\n').filter((l) => l.toLowerCase().includes(f));
+        console.log(casaram.length ? casaram.join('\n') : '(nada casou)');
+      } else {
+        console.log(t);
+      }
+      break;
+    }
+
     case 'tentativas': {
       if (resto[0] === '--zerar') {
         await api(`/tentativas/${encodeURIComponent(resto[1])}`, { method: 'DELETE' });
