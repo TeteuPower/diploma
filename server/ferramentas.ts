@@ -489,6 +489,25 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
+  const apagarArquivo = ferramenta(
+    'apagar_arquivo',
+    'Apaga um arquivo de trabalhos/. Use para tirar da pasta de entrega algo que não deveria ' +
+      'ir ao professor — depois de mover o conteúdo para `nota_para_dono`.',
+    { caminho: z.string(), porque: z.string().describe('Por que este arquivo não fica') },
+    async ({ caminho, porque }) => {
+      try {
+        const ok = await trabalhos.apagar(caminho);
+        if (!ok) return texto(`não existia: ${caminho}`);
+        await appendPasso(sessaoId, 'agiu', `Apagou ${caminho} — ${porque}`, {
+          ferramenta: 'apagar_arquivo',
+        });
+        return texto(`apagado: trabalhos/${caminho}`);
+      } catch (err) {
+        return texto(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
   const baixarAnexo = ferramenta(
     'baixar_anexo',
     'Baixa um arquivo do LMS (enunciado em PDF, dataset, template) para dentro de ' +
@@ -661,7 +680,7 @@ export function criarServidorLms(sessaoId: string) {
       abrir, olhar, capturar, rolar, voltar, esperar,
       clicar, escreverCampo, escolher,
       entrar, submeter,
-      escrever, lerArquivo, listarArquivos, baixarAnexo, gerarPdfTool, compactarTool, notaTool, revisarTool,
+      escrever, lerArquivo, listarArquivos, apagarArquivo, baixarAnexo, gerarPdfTool, compactarTool, notaTool, revisarTool,
       perguntar, anotar,
     ],
   });
@@ -672,6 +691,6 @@ export const FERRAMENTAS_LMS = [
   'abrir', 'olhar', 'capturar', 'rolar', 'voltar', 'esperar',
   'clicar', 'escrever', 'escolher',
   'entrar', 'submeter',
-  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'baixar_anexo', 'gerar_pdf', 'compactar', 'nota_para_dono', 'revisar_entregaveis',
+  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'apagar_arquivo', 'baixar_anexo', 'gerar_pdf', 'compactar', 'nota_para_dono', 'revisar_entregaveis',
   'perguntar', 'anotar',
 ].map((n) => `mcp__${SERVIDOR_MCP}__${n}`);
