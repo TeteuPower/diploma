@@ -7,6 +7,7 @@ import { appendPasso, getConfig } from './store';
 import type { AcaoSensivel } from '../shared/types';
 import * as tentativas from './tentativas';
 import * as trabalhos from './trabalhos';
+import { gerarPdf } from './pdf';
 import { log, aviso, erro as logErro, cronometro } from './log';
 
 export const SERVIDOR_MCP = 'lms';
@@ -525,6 +526,34 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
+  const gerarPdfTool = ferramenta(
+    'gerar_pdf',
+    'Converte um arquivo HTML de trabalhos/ em PDF. Use quando a atividade EXIGIR PDF — ' +
+      'escreva primeiro um .html completo (com <style> embutido; diagrama como SVG inline, ' +
+      'que imprime nítido) e converta. Nada de link para CSS ou imagem externa: só o que ' +
+      'estiver dentro do arquivo ou na mesma pasta entra no PDF.',
+    {
+      html: z.string().describe('O .html de origem, ex.: juncoes-tabelas/entrega.html'),
+      pdf: z.string().describe('O .pdf de destino, ex.: juncoes-tabelas/entrega.pdf'),
+      paisagem: z.boolean().default(false).describe('Use para diagrama largo'),
+    },
+    async ({ html, pdf, paisagem }) => {
+      try {
+        const { bytes } = await gerarPdf(html, pdf, { paisagem });
+        await appendPasso(sessaoId, 'agiu', `Gerou ${pdf} (${bytes} bytes) a partir de ${html}`, {
+          ferramenta: 'gerar_pdf',
+        });
+        return texto(`gerado: trabalhos/${pdf} (${bytes} bytes)`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await appendPasso(sessaoId, 'erro', `Falha ao gerar ${pdf}: ${msg}`, {
+          ferramenta: 'gerar_pdf',
+        });
+        return texto(`ERRO: ${msg}`);
+      }
+    },
+  );
+
   // -------------------------------------------------------------------------
   // Diálogo com o dono
   // -------------------------------------------------------------------------
@@ -565,7 +594,7 @@ export function criarServidorLms(sessaoId: string) {
       abrir, olhar, capturar, rolar, voltar, esperar,
       clicar, escreverCampo, escolher,
       entrar, submeter,
-      escrever, lerArquivo, listarArquivos, baixarAnexo,
+      escrever, lerArquivo, listarArquivos, baixarAnexo, gerarPdfTool,
       perguntar, anotar,
     ],
   });
@@ -576,6 +605,6 @@ export const FERRAMENTAS_LMS = [
   'abrir', 'olhar', 'capturar', 'rolar', 'voltar', 'esperar',
   'clicar', 'escrever', 'escolher',
   'entrar', 'submeter',
-  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'baixar_anexo',
+  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'baixar_anexo', 'gerar_pdf',
   'perguntar', 'anotar',
 ].map((n) => `mcp__${SERVIDOR_MCP}__${n}`);
