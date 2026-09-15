@@ -164,6 +164,9 @@ async function rodar(sessaoId: string, ctrl: AbortController): Promise<void> {
     disallowedTools: ['Bash', 'Edit', 'Write', 'Read', 'Glob', 'Grep', 'Agent', 'Task', 'WebFetch'],
     permissionMode: 'bypassPermissions',
     maxTurns: cfg.navegador.maxPassos,
+    // Esforço de raciocínio: vale a pena em questão difícil, onde a alternativa
+    // quase-certa é o que derruba. 'low'/'medium'/'high' são níveis do SDK.
+    effort: cfg.esforco,
     ...(cfg.modelo !== 'default' ? { model: cfg.modelo } : {}),
     // Retoma de onde parou, quando a sessão já rodou antes.
     ...(sessao.sessionId ? { resume: sessao.sessionId } : {}),
