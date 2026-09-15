@@ -94,8 +94,15 @@ function montarPrompt(sessao: Sessao): string {
     '- **Se a atividade exigir PDF** — e quase toda exige — não entregue só Markdown: escreva',
     '  um `.html` completo (CSS num `<style>` embutido, diagrama em SVG inline, que imprime',
     '  nítido) e passe em `gerar_pdf`. Formato errado costuma custar nota mesmo com conteúdo certo.',
-    '- Ponha um `LEIA.md` em cada subpasta dizendo o que é cada arquivo, o que ficou pronto e',
-    '  o que depende de informação que só o dono ou o grupo têm.',
+    '',
+    '### A pasta da atividade contém SÓ o que vai para o professor',
+    'Recado para o dono — o que faltou, o que ele precisa conferir, o que depende do grupo —',
+    'vai por `nota_para_dono`, que grava em `_notas/`, fora da entrega e fora do ZIP.',
+    '**Nada disso pode aparecer dentro de um arquivo do trabalho**, nem como arquivo solto na',
+    'pasta, nem como parágrafo no meio do documento, nem como comentário no código. O dono',
+    'envia a pasta inteira sem reler cada linha; um "AVISO: confirme com o grupo" embutido',
+    'chega ao professor junto com a entrega.',
+    'Antes de encerrar, rode `revisar_entregaveis` e limpe o que ele apontar.',
     '',
     cfg.permitirEntrega
       ? '**A entrega no LMS está LIBERADA** — mas continua passando pelo portão de aprovação.'

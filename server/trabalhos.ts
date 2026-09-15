@@ -19,6 +19,29 @@ import { log, aviso } from './log';
 
 export const RAIZ_TRABALHOS = join(PROJECT_ROOT, 'trabalhos');
 
+/**
+ * Onde moram os recados para o dono — e **fora** das pastas de entrega.
+ *
+ * O risco é concreto: um `LEIA.md` dizendo "reconstruí o modelo, confirme com o
+ * grupo" dentro da pasta do trabalho entra no ZIP junto e vai parar na mão do
+ * professor. O dono avisou que pode deixar passar, e ele tem razão — revisar
+ * pasta antes de enviar é exatamente o tipo de coisa que se esquece.
+ *
+ * Então a separação é estrutural: qualquer caminho começando por `_` é da
+ * aplicação, `escrever_arquivo` não escreve nele, e `compactar` não o inclui.
+ * O que está na pasta da atividade é só o que vai para o professor.
+ */
+export const PREFIXO_INTERNO = '_';
+export const PASTA_NOTAS = '_notas';
+
+/** Um caminho reservado à aplicação? (qualquer segmento começando por `_`) */
+export function ehInterno(rel: string): boolean {
+  return rel
+    .replace(/\\/g, '/')
+    .split('/')
+    .some((seg) => seg.startsWith(PREFIXO_INTERNO));
+}
+
 /** Teto por arquivo. Entregável acadêmico não passa disso; loop de escrita sim. */
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_ARQUIVOS = 300;
@@ -52,6 +75,12 @@ export function resolverCaminho(rel: string): string {
 }
 
 export async function escrever(rel: string, conteudo: string): Promise<{ bytes: number }> {
+  if (ehInterno(rel)) {
+    throw new Error(
+      `"${rel}" usa o prefixo "_", reservado para recados ao dono. ` +
+        'Entregável vai na pasta da atividade; recado vai por `nota_para_dono`.',
+    );
+  }
   const destino = resolverCaminho(rel);
   const bytes = Buffer.byteLength(conteudo, 'utf8');
   if (bytes > MAX_BYTES) {
@@ -127,6 +156,62 @@ export async function apagar(rel: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Grava um recado para o dono, sempre fora das pastas de entrega. */
+export async function notaParaDono(atividade: string, texto: string): Promise<string> {
+  const nome = atividade.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'geral';
+  const rel = `${PASTA_NOTAS}/${nome}.md`;
+  const destino = resolverCaminho(rel);
+  await fs.mkdir(dirname(destino), { recursive: true });
+  await fs.writeFile(destino, texto, 'utf8');
+  log('trabalhos', 'nota para o dono gravada', { caminho: rel, bytes: Buffer.byteLength(texto) });
+  return rel;
+}
+
+/**
+ * Procura recado ao dono que tenha vazado para dentro de um entregável.
+ *
+ * A trava estrutural resolve o arquivo no lugar errado, mas não resolve o
+ * parágrafo no lugar errado: um "AVISO: confirme isto com o grupo" no meio do
+ * documento entregue é igualmente constrangedor, e é o que mais escapa. Isto
+ * não bloqueia nada — aponta, para o dono conferir antes de enviar.
+ */
+const MARCAS_DE_RECADO = [
+  /\bPREENCHER\b/i,
+  /\bTODO\b/,
+  /\[\s*inserir\b/i,
+  /\bconfirme\s+(com|o|a|se)\b/i,
+  /\bvoc[êe]\s+precisa\b/i,
+  /\bpend[êe]ncia[s]?\b/i,
+  /\bn[ãa]o\s+(consegui|tenho|inventei)\b/i,
+  /\baviso\s+importante\b/i,
+  /\bdepende\s+de\s+voc[êe]\b/i,
+  /\bajuste\s+(os|as|o|a)\b/i,
+];
+
+export interface Suspeita {
+  caminho: string;
+  linha: number;
+  trecho: string;
+}
+
+export async function revisarEntregaveis(): Promise<Suspeita[]> {
+  const suspeitas: Suspeita[] = [];
+  const textuais = /\.(md|txt|sql|html|css|js|java|json|xml|properties|yml|yaml)$/i;
+
+  for (const item of await listar()) {
+    if (ehInterno(item.caminho)) continue; // recado no lugar certo
+    if (!textuais.test(item.caminho)) continue;
+
+    const conteudo = await ler(item.caminho).catch(() => '');
+    conteudo.split('\n').forEach((linha, i) => {
+      if (MARCAS_DE_RECADO.some((re) => re.test(linha))) {
+        suspeitas.push({ caminho: item.caminho, linha: i + 1, trecho: linha.trim().slice(0, 160) });
+      }
+    });
+  }
+  return suspeitas;
 }
 
 export async function initTrabalhos(): Promise<void> {

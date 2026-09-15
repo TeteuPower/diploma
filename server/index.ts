@@ -14,6 +14,7 @@ import { cofreRouter } from './routes/cofre';
 import { sessoesRouter } from './routes/sessoes';
 import { tentativasRouter } from './routes/tentativas';
 import { debugRouter } from './routes/debug';
+import { revisaoRouter } from './routes/revisao';
 import { healthRouter } from './routes/health';
 
 async function main() {
@@ -32,6 +33,7 @@ async function main() {
   app.use('/api/sessoes', sessoesRouter);
   app.use('/api/tentativas', tentativasRouter);
   app.use('/api/debug', debugRouter);
+  app.use('/api/revisao', revisaoRouter);
   app.use('/api/health', healthRouter);
 
   app.use('/api', (_req, res) => res.status(404).json({ error: 'rota não encontrada' }));

@@ -555,6 +555,46 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
+  const notaTool = ferramenta(
+    'nota_para_dono',
+    'ÚNICO lugar para recado ao dono: o que ficou faltando, o que ele precisa conferir, o que ' +
+      'depende do grupo. Vai para _notas/, FORA da pasta de entrega, e nunca entra no ZIP. ' +
+      'Nada disso pode aparecer dentro de um arquivo do trabalho — o professor leria junto.',
+    {
+      atividade: z.string().describe('A qual atividade o recado se refere, ex.: juncoes-tabelas'),
+      texto: z.string().describe('O recado completo, em Markdown'),
+    },
+    async ({ atividade, texto: conteudo }) => {
+      try {
+        const rel = await trabalhos.notaParaDono(atividade, conteudo);
+        await appendPasso(sessaoId, 'agiu', `Deixou recado para o dono em ${rel}`, {
+          ferramenta: 'nota_para_dono',
+        });
+        return texto(`recado gravado em trabalhos/${rel} (fora da entrega)`);
+      } catch (err) {
+        return texto(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
+  const revisarTool = ferramenta(
+    'revisar_entregaveis',
+    'Varre os arquivos de entrega procurando recado ao dono que tenha vazado para dentro ' +
+      'deles (PREENCHER, TODO, "confirme com", "depende de você", "AVISO IMPORTANTE"). ' +
+      'Rode SEMPRE antes de encerrar: se apontar algo, reescreva o arquivo sem aquilo e mova ' +
+      'o conteúdo para `nota_para_dono`.',
+    {},
+    async () => {
+      const suspeitas = await trabalhos.revisarEntregaveis();
+      if (!suspeitas.length) return texto('limpo: nenhum recado ao dono dentro dos entregáveis.');
+      return texto(
+        `${suspeitas.length} trecho(s) que parecem recado ao dono DENTRO da entrega — ` +
+          'tire-os do arquivo e mova para `nota_para_dono`:\n\n' +
+          suspeitas.map((s) => `${s.caminho}:${s.linha}  ${s.trecho}`).join('\n'),
+      );
+    },
+  );
+
   const compactarTool = ferramenta(
     'compactar',
     'Compacta uma subpasta de trabalhos/ num .zip. Use quando o enunciado pedir o projeto ' +
@@ -621,7 +661,7 @@ export function criarServidorLms(sessaoId: string) {
       abrir, olhar, capturar, rolar, voltar, esperar,
       clicar, escreverCampo, escolher,
       entrar, submeter,
-      escrever, lerArquivo, listarArquivos, baixarAnexo, gerarPdfTool, compactarTool,
+      escrever, lerArquivo, listarArquivos, baixarAnexo, gerarPdfTool, compactarTool, notaTool, revisarTool,
       perguntar, anotar,
     ],
   });
@@ -632,6 +672,6 @@ export const FERRAMENTAS_LMS = [
   'abrir', 'olhar', 'capturar', 'rolar', 'voltar', 'esperar',
   'clicar', 'escrever', 'escolher',
   'entrar', 'submeter',
-  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'baixar_anexo', 'gerar_pdf', 'compactar',
+  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'baixar_anexo', 'gerar_pdf', 'compactar', 'nota_para_dono', 'revisar_entregaveis',
   'perguntar', 'anotar',
 ].map((n) => `mcp__${SERVIDOR_MCP}__${n}`);

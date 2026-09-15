@@ -35,7 +35,11 @@ $ErrorActionPreference = 'Stop'
 $origem  = ${aspas(origem)}
 $destino = ${aspas(destino)}
 if (-not (Test-Path -LiteralPath $origem)) { throw "pasta nao encontrada: $origem" }
-Compress-Archive -Path (Join-Path $origem '*') -DestinationPath $destino -Force
+# Tudo que comeca com "_" e recado ao dono, nao entregavel: fica de fora do
+# ZIP mesmo que alguem tenha escrito por engano dentro da pasta da atividade.
+$itens = Get-ChildItem -LiteralPath $origem -Force | Where-Object { -not $_.Name.StartsWith('_') }
+if (-not $itens) { throw "nada a compactar em $origem" }
+Compress-Archive -Path $itens.FullName -DestinationPath $destino -Force
 `;
 
   await new Promise<void>((resolve, reject) => {

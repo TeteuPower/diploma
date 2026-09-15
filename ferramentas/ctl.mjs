@@ -245,6 +245,29 @@ try {
       break;
     }
 
+    case 'revisar': {
+      // O que vai para o professor, e o que ainda tem recado ao dono embutido.
+      const { arquivos, suspeitas } = await api('/revisao');
+      const porPasta = {};
+      for (const a of arquivos) {
+        const pasta = a.caminho.split('/')[0];
+        porPasta[pasta] = (porPasta[pasta] ?? 0) + 1;
+      }
+      console.log('ENTREGAVEIS');
+      for (const [pasta, n] of Object.entries(porPasta)) {
+        const interna = pasta.startsWith('_');
+        console.log(`  ${interna ? '(interno) ' : ''}${pasta}: ${n} arquivo(s)`);
+      }
+      console.log('');
+      if (!suspeitas.length) {
+        console.log('[32mLIMPO[0m: nenhum recado ao dono dentro dos entregaveis.');
+      } else {
+        console.log(`[33m${suspeitas.length} trecho(s) suspeitos DENTRO da entrega:[0m`);
+        for (const s of suspeitas) console.log(`  ${s.caminho}:${s.linha}  ${s.trecho}`);
+      }
+      break;
+    }
+
     case 'tentativas': {
       if (resto[0] === '--zerar') {
         await api(`/tentativas/${encodeURIComponent(resto[1])}`, { method: 'DELETE' });
