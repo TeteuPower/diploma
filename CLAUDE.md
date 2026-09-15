@@ -107,6 +107,31 @@ Fachada precisa se declarar (`<label>`, `role`, `onclick`) e o controle precisa 
 um token CSRF escondido viraria alternativa fantasma. `marcar()` em [server/navegador.ts](server/navegador.ts)
 detecta se o ref caiu num input ou numa fachada — `check()` só entende o primeiro.
 
+### O botão que só o CSS declara
+
+Um LMS real escondeu do agente justamente o **"ENVIAR TUDO E TERMINAR"**: elemento estilizado, sem
+tag de botão, sem `role`, sem `onclick` como atributo — o listener veio de `addEventListener`, que
+página nenhuma enxerga por dentro — e sem controle escondido atrás. Não passava em nenhuma regra e
+sumia, no pior lugar possível para sumir.
+
+A regra que resolve é `cursor: pointer`, e não é um palpite: é literalmente como o site avisa o
+humano de que aquilo se clica. Sai com papel **`clicavel`**, sinalizando ao agente que a certeza ali
+é menor que num `<button>`. Duas guardas contra o efeito colateral, porque `pointer` é herdado: o
+`<span>` dentro de um `<button>` não vira segundo ref, e só o elemento **mais interno** com esse
+cursor é marcado (clicar nele funciona de qualquer forma — o evento sobe).
+
+Junto veio outra limpeza: texto que já virou o rótulo de um acionável acima não se repete como linha
+de texto. Sem isso, `<button><span>Salvar</span></button>` dava duas linhas "Salvar", uma acionável
+e outra não, e o agente gastava turno decidindo qual era a de verdade.
+
+### Visível ≠ alcançável
+
+Painel deslizante fechado, menu fora da tela, modal em `left:-9999px`: tudo isso tem caixa e passa em
+`visivel()`, e mesmo assim é inclicável — o Playwright rola, não chega, e queima 20 s até estourar.
+`alcancavel()` derruba só os casos sem ambiguidade (fora do documento, `fixed` fora da janela,
+recortado por `overflow:hidden`). Conteúdo abaixo da dobra continua entrando: **filtrar demais é pior
+que filtrar de menos**. Como rede final, `clicar` tem prazo curto e plano B — normal → forçado → DOM.
+
 ### A armadilha do `evaluate`
 
 `coletarInstantaneo` é serializada para dentro da página **pelo seu próprio texto**. Duas coisas
@@ -141,6 +166,39 @@ devem poluir a trilha do dono. `→ ferramenta` / `← ferramenta` com `ms` e `c
 qual passo travou e se o instantâneo veio vazio.
 
 Nada de senha no log: `entrar` registra o usuário e o resultado, nunca o segredo.
+
+## Produzir entregáveis
+
+O agente não só opera o LMS: ele escreve os arquivos do trabalho. `escrever_arquivo`,
+`ler_arquivo`, `listar_arquivos`, `baixar_anexo` e `gerar_pdf` alcançam **apenas** a pasta
+`trabalhos/` ([server/trabalhos.ts](server/trabalhos.ts)).
+
+Mesma filosofia da fronteira de domínio: a parede é código, verificada no caminho absoluto depois
+de `resolve()` — comparar string antes de normalizar deixa passar `a/../../etc/senha`. Ele também
+não tem `Read`/`Write`/`Bash` do Claude Code (ficam em `disallowedTools`), justamente para não ter
+a máquina inteira ao alcance; e separar `trabalhos/` do projeto evita que ele edite a si mesmo por
+acidente.
+
+- **`baixar_anexo`** usa o `request` do contexto do Playwright, não um fetch solto: anexo de LMS
+  está atrás de login, e fetch anônimo traria a página de entrada em vez do arquivo.
+- **`gerar_pdf`** ([server/pdf.ts](server/pdf.ts)) imprime um `.html` pelo próprio Chromium —
+  atividade quase sempre exige PDF, e entregar `.md` custa nota mesmo com o conteúdo certo. Usa um
+  navegador **descartável e headless**: `page.pdf()` não funciona com cabeça, e não se carrega
+  arquivo local no contexto que guarda o cookie da faculdade.
+
+### A trava de entrega
+
+`permitirEntrega` (padrão **false**) separa produzir de enviar: com ela fechada, `submeter`,
+`enviar_arquivo` e `marcar_concluido` são recusados no ponto de execução. A checagem vem **antes**
+do portão de aprovação — com a trava fechada, perguntar ao dono seria perder o ponto, ele já
+respondeu quando a deixou assim.
+
+### Honestidade do entregável
+
+O system prompt exige um `LEIA.md` por pasta listando o que ficou faltando por depender do dono ou
+do grupo (código de colega, print, nomes, link de repo). Entregável honesto com lacunas marcadas
+vale mais que um completo com dado inventado: o dono precisa saber onde olhar antes de pôr o nome
+dele naquilo.
 
 ## O limite de tentativas
 
