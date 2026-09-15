@@ -68,6 +68,9 @@ export function coletarInstantaneo(
     'DT', 'DD', 'FIGCAPTION', 'BLOCKQUOTE', 'CAPTION', 'LABEL', 'SPAN', 'DIV',
   ]);
   const IGNORAR = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'HEAD', 'META', 'LINK', 'TEMPLATE']);
+  // Containers que carregam input escondido por outros motivos (token CSRF,
+  // campo de estado): nunca são a fachada clicável de uma alternativa.
+  const NAO_SAO_FACHADA = new Set(['FORM', 'FIELDSET', 'BODY', 'MAIN', 'SECTION', 'ARTICLE', 'NAV', 'TABLE', 'UL', 'OL']);
 
   // Limpa refs do instantâneo anterior: nada de ref fantasma sobrevivendo.
   document.querySelectorAll('[' + atributo + ']').forEach(function (el) {
@@ -87,6 +90,56 @@ export function coletarInstantaneo(
     // Campo type=hidden não tem caixa. Se o humano não pode preencher, o agente
     // também não deve — então some do instantâneo junto com o resto do invisível.
     return r.width > 0 || r.height > 0;
+  }
+
+  /**
+   * O padrão "alternativa como card": o <input type=radio> de verdade é
+   * escondido (opacity:0, tamanho zero, display:none) e quem responde ao clique
+   * é o <label>/card estilizado por cima. É como quase todo LMS moderno desenha
+   * quiz — e, lido ao pé da letra, `visivel()` jogava o controle fora e não
+   * sobrava ref nenhum para marcar a alternativa.
+   *
+   * Então: quando um elemento VISÍVEL é a fachada de um controle ESCONDIDO, o
+   * ref pousa na fachada (que é o que responde ao clique) e a semântica vem do
+   * controle (que é quem sabe se está marcado). É o que um humano faz: ele
+   * clica no card, não no input.
+   *
+   * Devolve o controle escondido, ou null quando não é esse caso.
+   */
+  function controleAtrasDaFachada(el: Element): HTMLInputElement | null {
+    if (!visivel(el)) return null;
+
+    // Containers grandes carregam inputs escondidos por outros motivos
+    // (CSRF token, campo de estado). Fachada é peça pequena e específica.
+    if (NAO_SAO_FACHADA.has(el.tagName)) return null;
+
+    const rotulo = el.tagName === 'LABEL' ? (el as HTMLLabelElement) : null;
+    let ctrl: Element | null = null;
+
+    // <label for="x"> com o input em outro lugar do DOM.
+    if (rotulo && rotulo.htmlFor) ctrl = document.getElementById(rotulo.htmlFor);
+    // <label><input …> texto</label>, ou card que embrulha o input.
+    if (!ctrl) ctrl = el.querySelector('input');
+
+    if (!ctrl || ctrl.tagName !== 'INPUT') return null;
+    const inp = ctrl as HTMLInputElement;
+
+    // Só interessa o que é marcável: radio e checkbox. Um campo de texto
+    // escondido atrás de um card não é uma alternativa de questão.
+    const t = (inp.type || '').toLowerCase();
+    if (t !== 'radio' && t !== 'checkbox') return null;
+
+    // Se o controle já aparece sozinho, o caminho normal dá conta.
+    if (visivel(inp)) return null;
+
+    // Fachada tem que ser clicável de fato: um <label> sempre é (o clique
+    // propaga para o controle); qualquer outra coisa precisa se declarar.
+    const ehLabel = el.tagName === 'LABEL';
+    const papel = (el.getAttribute('role') || '').toLowerCase();
+    const declarado = papel === 'radio' || papel === 'checkbox' || papel === 'option' || papel === 'button';
+    if (!ehLabel && !declarado && !el.hasAttribute('onclick')) return null;
+
+    return inp;
   }
 
   /** Nome acessível, na ordem de precedência que os leitores de tela usam. */
@@ -217,7 +270,12 @@ export function coletarInstantaneo(
     if (IGNORAR.has(el.tagName)) return;
     if (!visivel(el)) return;
 
-    const interativo = ehInterativo(el);
+    // Quando o elemento é a fachada de um controle escondido, ele passa a ser
+    // o alvo do clique e o controle empresta o papel e o estado.
+    const oculto = controleAtrasDaFachada(el);
+    const semantica = oculto ?? el;
+
+    const interativo = Boolean(oculto) || ehInterativo(el);
     const imagem = el.tagName === 'IMG';
     const blocoTexto = BLOCOS_TEXTO.has(el.tagName);
 
@@ -252,7 +310,10 @@ export function coletarInstantaneo(
           const href = (el.getAttribute('href') || '').slice(0, 120);
           if (href) extra = ' href=' + href;
         }
-        linhas.push(recuo + '- ' + papelDe(el) + ' ' + JSON.stringify(nome) + ref + estadoDe(el) + extra);
+        linhas.push(
+          recuo + '- ' + papelDe(semantica) + ' ' + JSON.stringify(nome) + ref +
+          estadoDe(semantica) + extra,
+        );
         emitiu = true;
       }
     }

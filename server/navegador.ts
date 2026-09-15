@@ -238,8 +238,31 @@ export async function selecionar(ref: string, valor: string): Promise<void> {
 export async function marcar(ref: string, marcado: boolean): Promise<void> {
   const { frame, seletor } = resolverRef(ref);
   const alvo = frame.locator(seletor).first();
-  if (marcado) await alvo.check();
-  else await alvo.uncheck();
+
+  // O ref pode estar no próprio input OU na fachada que o esconde (o card da
+  // alternativa). `check()` só entende input — na fachada ele lança "Not a
+  // checkbox or radio input", que foi exatamente como o quiz da FIAP travou.
+  const ehInput = await alvo.evaluate((el) => {
+    const t = (el as HTMLInputElement).type;
+    return el.tagName === 'INPUT' && (t === 'checkbox' || t === 'radio');
+  });
+
+  if (ehInput) {
+    if (marcado) await alvo.check();
+    else await alvo.uncheck();
+  } else {
+    // Na fachada, clicar é o certo: é o que um humano faz, e é o que dispara os
+    // listeners que o site pendurou no card. Radio não desmarca por clique, e
+    // checkbox só alterna — então conferimos o estado e só clicamos se precisar.
+    const jaEsta = await alvo.evaluate((el) => {
+      const inp = el.querySelector('input') as HTMLInputElement | null;
+      const porFor = (el as HTMLLabelElement).htmlFor
+        ? (document.getElementById((el as HTMLLabelElement).htmlFor) as HTMLInputElement | null)
+        : null;
+      return (inp ?? porFor)?.checked ?? false;
+    });
+    if (jaEsta !== marcado) await alvo.click();
+  }
   await assentar();
 }
 

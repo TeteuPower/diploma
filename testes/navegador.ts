@@ -36,6 +36,17 @@ const QUIZ = `<!doctype html>
     <input type="checkbox" id="conf" name="conf">
     <button type="button" id="enviar">Finalizar tentativa</button>
   </form>
+
+  <!-- O padrão que travou no quiz da FIAP: alternativa é um card e o radio de
+       verdade está escondido. As três formas de esconder que se vê na prática. -->
+  <input type="hidden" name="csrf" value="tok123">
+  <fieldset id="cards">
+    <legend>4. Para que serve o padrão DAO?</legend>
+    <label class="card"><input type="radio" name="q4" value="a" style="opacity:0;position:absolute"> Para renderizar a interface do usuário</label>
+    <label class="card"><input type="radio" name="q4" value="b" style="width:0;height:0"> Fornece uma abstração da camada de acesso a dados</label>
+    <label class="card" for="q4c">Para cifrar o tráfego de rede</label>
+    <input type="radio" name="q4" value="c" id="q4c" style="display:none">
+  </fieldset>
   <p style="display:none">Este texto invisível NÃO pode aparecer</p>
   <iframe src="/embutido" title="Conteúdo SCORM" width="600" height="200"></iframe>
 </body></html>`;
@@ -148,6 +159,37 @@ try {
     await nav.clicar(refIframe).catch(() => { clicou = false; });
     checa('clica dentro do iframe', clicou, refIframe);
   }
+
+  // --- Alternativa como card, com o radio escondido (o caso da FIAP) ---
+  console.log('\nAlternativa como card (radio escondido):');
+  await nav.navegar('/curso');
+  const cards = await nav.instantaneo();
+
+  const comRef = (trecho: string) =>
+    new RegExp('radio "[^"]*' + trecho + '[^"]*"[^\\n]*ref=(e\\d+)').exec(cards)?.[1];
+
+  const refOpacity = comRef('renderizar a interface');
+  const refTamanho = comRef('abstração da camada');
+  const refDisplay = comRef('cifrar o tráfego');
+
+  checa('acha o card com radio opacity:0', Boolean(refOpacity), refOpacity ?? 'sem ref');
+  checa('acha o card com radio de tamanho zero', Boolean(refTamanho), refTamanho ?? 'sem ref');
+  checa('acha o card com radio display:none (label for=)', Boolean(refDisplay), refDisplay ?? 'sem ref');
+  checa('o card reporta papel "radio", não "texto"', /radio "[^"]*abstração/.test(cards));
+  checa('o card reporta o estado do controle escondido', /abstração[^\n]*\[desmarcado/.test(cards));
+
+  if (refTamanho) {
+    await nav.marcar(refTamanho, true);
+    const depois = await nav.instantaneo();
+    // Esta asserção prova o que importa: o estado vem de `.checked` do input
+    // escondido, não da aparência do card. Se o clique só tivesse mexido no
+    // visual, aqui continuaria [desmarcado].
+    checa('marcar() no card marca o input de verdade', /abstração[^\n]*\[marcado/.test(depois));
+    checa('a alternativa irmã continua desmarcada', /renderizar[^\n]*\[desmarcado/.test(depois));
+  }
+
+  // O token escondido não pode virar alternativa fantasma.
+  checa('NÃO inventa ref para o token escondido sem fachada', !/csrf/i.test(cards));
 
   // --- A senha não pode vazar ---
   console.log('\nVazamento de senha no instantâneo:');

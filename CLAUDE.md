@@ -90,6 +90,23 @@ Refs são **reatribuídos a cada instantâneo**, então toda ferramenta que muda
 instantâneo novo. `f1e7` = elemento `e7` dentro do iframe 1 — LMS é feito de iframe (SCORM, H5P,
 vídeo), e sem isso o agente veria só a moldura vazia.
 
+### Alternativa como card (o radio que não existe)
+
+Quase todo LMS moderno desenha quiz assim: a alternativa é um card estilizado e o
+`<input type="radio">` de verdade fica escondido atrás dele — `opacity:0`, tamanho zero ou
+`display:none`. Lido ao pé da letra, "elemento invisível não entra no instantâneo" apagava o
+controle e **não sobrava ref nenhum para marcar a alternativa**. Foi assim que o primeiro quiz real
+travou.
+
+A regra que resolve: **quando um elemento visível é a fachada de um controle escondido, o ref pousa
+na fachada e a semântica vem do controle.** O agente vê `radio "texto da alternativa" ref=e8
+[desmarcado]`; o clique vai no card, que é o que dispara os listeners do site — igual a um humano.
+O `[marcado]` continua saindo do `.checked` do input, então mudança só-visual não engana ninguém.
+
+Fachada precisa se declarar (`<label>`, `role`, `onclick`) e o controle precisa ser marcável, senão
+um token CSRF escondido viraria alternativa fantasma. `marcar()` em [server/navegador.ts](server/navegador.ts)
+detecta se o ref caiu num input ou numa fachada — `check()` só entende o primeiro.
+
 ### A armadilha do `evaluate`
 
 `coletarInstantaneo` é serializada para dentro da página **pelo seu próprio texto**. Duas coisas
