@@ -8,6 +8,7 @@ import type { AcaoSensivel } from '../shared/types';
 import * as tentativas from './tentativas';
 import * as trabalhos from './trabalhos';
 import { gerarPdf } from './pdf';
+import { compactar } from './compactar';
 import { log, aviso, erro as logErro, cronometro } from './log';
 
 export const SERVIDOR_MCP = 'lms';
@@ -554,6 +555,32 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
+  const compactarTool = ferramenta(
+    'compactar',
+    'Compacta uma subpasta de trabalhos/ num .zip. Use quando o enunciado pedir o projeto ' +
+      'em ZIP. Se o nome exigido depender de um dado que você não tem (número do grupo, por ' +
+      'exemplo), NÃO chute: deixe o ZIP com nome provisório e diga isso no LEIA.md.',
+    {
+      pasta: z.string().describe('A subpasta a compactar, ex.: fintech-jdbc'),
+      zip: z.string().describe('O destino, ex.: fintech-jdbc.zip'),
+    },
+    async ({ pasta, zip }) => {
+      try {
+        const { bytes } = await compactar(pasta, zip);
+        await appendPasso(sessaoId, 'agiu', `Compactou ${pasta} em ${zip} (${bytes} bytes)`, {
+          ferramenta: 'compactar',
+        });
+        return texto(`gerado: trabalhos/${zip} (${bytes} bytes)`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await appendPasso(sessaoId, 'erro', `Falha ao compactar ${pasta}: ${msg}`, {
+          ferramenta: 'compactar',
+        });
+        return texto(`ERRO: ${msg}`);
+      }
+    },
+  );
+
   // -------------------------------------------------------------------------
   // Diálogo com o dono
   // -------------------------------------------------------------------------
@@ -594,7 +621,7 @@ export function criarServidorLms(sessaoId: string) {
       abrir, olhar, capturar, rolar, voltar, esperar,
       clicar, escreverCampo, escolher,
       entrar, submeter,
-      escrever, lerArquivo, listarArquivos, baixarAnexo, gerarPdfTool,
+      escrever, lerArquivo, listarArquivos, baixarAnexo, gerarPdfTool, compactarTool,
       perguntar, anotar,
     ],
   });
@@ -605,6 +632,6 @@ export const FERRAMENTAS_LMS = [
   'abrir', 'olhar', 'capturar', 'rolar', 'voltar', 'esperar',
   'clicar', 'escrever', 'escolher',
   'entrar', 'submeter',
-  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'baixar_anexo', 'gerar_pdf',
+  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'baixar_anexo', 'gerar_pdf', 'compactar',
   'perguntar', 'anotar',
 ].map((n) => `mcp__${SERVIDOR_MCP}__${n}`);
