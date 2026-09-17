@@ -29,15 +29,11 @@ A LLM autentica pela **assinatura do Claude Code**. Se ainda não logou nesta m�
 
 ```bash
 claude       # loga uma vez; o SDK reaproveita a credencial
+npm run dev  # interface em http://localhost:5980
 ```
 
-## Rodar
-
-```bash
-npm run dev           # interface em http://localhost:5980
-```
-
-Em produção, `npm run build && npm start` sobe um processo só em `http://localhost:8980`.
+`npm run build && npm start` sobe um processo só em `http://localhost:8980`. Para gerar o
+instalador localmente: `npm run empacotar` (precisa do Inno Setup 6).
 
 ## Os três passos da primeira vez
 
