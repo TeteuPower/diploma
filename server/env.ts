@@ -59,15 +59,18 @@ export const PORT = Number(process.env.DIPLOMA_PORT ?? 8980);
  * mesma do build.ps1, o nome do .exe carrega a mesma, e o updater compara com
  * esta. Uma fonte só, ou uma hora as três divergem.
  */
-function lerVersao(): string {
+export function lerVersaoDe(caminho: string): string {
   try {
-    const pkg = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf8')) as { version?: string };
+    // O BOM que o PowerShell 5.1 grava por padrão derruba o JSON.parse — e a
+    // versão viraria 0.0.0, o que faria o updater achar toda release "mais nova".
+    const bruto = readFileSync(caminho, 'utf8').replace(/^﻿/, '');
+    const pkg = JSON.parse(bruto) as { version?: string };
     return pkg.version ?? '0.0.0';
   } catch {
     return '0.0.0';
   }
 }
-export const VERSION = lerVersao();
+export const VERSION = lerVersaoDe(join(PROJECT_ROOT, 'package.json'));
 
 /** Repositório de onde vêm as atualizações, quando a config não diz outro. */
 export const REPOSITORIO_PADRAO = 'TeteuPower/diploma';

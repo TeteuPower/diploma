@@ -88,7 +88,9 @@ $prod = [ordered]@{
     description  = $pkg.description
     dependencies = $pkg.dependencies
 }
-$prod | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $publish 'package.json') -Encoding UTF8
+# Sem BOM: Set-Content -Encoding UTF8 no PowerShell 5.1 grava BOM, e JSON.parse do lado do
+# Node não engole BOM — a versão viraria 0.0.0. O leitor também tolera, mas aqui a fonte sai limpa.
+[IO.File]::WriteAllText((Join-Path $publish 'package.json'), ($prod | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host 'Dependências de produção (npm install --omit=dev)...' -ForegroundColor Cyan
 Push-Location $publish

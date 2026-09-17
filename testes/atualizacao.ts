@@ -76,5 +76,26 @@ checa('sem pré-release: maior é a 1.3.0 (draft 2.0.0 ignorado)', escolher(list
 checa('com pré-release: a 1.4.1 do canal latest vence', escolher(lista, repo, true)?.versao === '1.4.1');
 checa('lista vazia → null', escolher([], repo, true) === null);
 
+// A versão instalada vem do package.json publicado. O smoke test do layout
+// instalado a viu como 0.0.0: o BOM que o PowerShell 5.1 grava por padrão
+// derrubava o JSON.parse. Com 0.0.0, TODA release seria "mais nova".
+console.log('\nLeitura da versão instalada:');
+{
+  const { lerVersaoDe } = await import('../server/env');
+  const { writeFileSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const dir = tmpdir();
+  const comBom = join(dir, 'diploma-pkg-bom.json');
+  const semBom = join(dir, 'diploma-pkg.json');
+  writeFileSync(comBom, '﻿{"name":"x","version":"9.9.9"}', 'utf8');
+  writeFileSync(semBom, '{"name":"x","version":"8.8.8"}', 'utf8');
+  checa('lê a versão com BOM (PowerShell 5.1)', lerVersaoDe(comBom) === '9.9.9', lerVersaoDe(comBom));
+  checa('lê a versão sem BOM', lerVersaoDe(semBom) === '8.8.8');
+  checa('arquivo ausente → 0.0.0 (e não exceção)', lerVersaoDe(join(dir, 'nao-existe.json')) === '0.0.0');
+  rmSync(comBom, { force: true });
+  rmSync(semBom, { force: true });
+}
+
 console.log(`\n${falhas === 0 ? '✅ tudo passou' : `❌ ${falhas} falha(s)`}`);
 process.exit(falhas === 0 ? 0 : 1);
