@@ -93,6 +93,39 @@ export const testarBrave = () =>
 // --- Entrega (conferido no disco, não relatado pelo agente) ---
 export const getEntrega = () => jsonFetch<PainelEntrega>('/api/entrega');
 
+// --- Atualização (mesmo contrato do Claude Indicator: releases do GitHub) ---
+export interface InfoAtualizacao {
+  versao: string;
+  tag: string;
+  notas: string;
+  urlDownload: string;
+  urlPagina: string;
+  bytes: number;
+}
+export interface EstadoAtualizacao {
+  versaoAtual: string;
+  instalado: boolean;
+  disponivel: InfoAtualizacao | null;
+  ultimaChecagem: string | null;
+  andamento: { fase: 'baixando' | 'instalando' | 'erro'; progresso: number; detalhe: string } | null;
+}
+export const getAtualizacao = () => jsonFetch<EstadoAtualizacao>('/api/atualizacao');
+export const verificarAtualizacao = () =>
+  jsonFetch<EstadoAtualizacao>('/api/atualizacao/verificar', { method: 'POST' });
+export const instalarAtualizacao = () =>
+  jsonFetch<{ ok: boolean; motivo: string }>('/api/atualizacao/instalar', { method: 'POST' });
+
+// --- Chromium (instalado pelo próprio Playwright, com o node empacotado) ---
+export interface InstalacaoChromium {
+  instalado: boolean;
+  rodando: boolean;
+  ok: boolean | null;
+  saida: string[];
+}
+export const getInstalacaoChromium = () => jsonFetch<InstalacaoChromium>('/api/navegador/instalacao');
+export const instalarChromium = () =>
+  jsonFetch<{ ok: boolean }>('/api/navegador/instalar', { method: 'POST' });
+
 // --- Saúde ---
 export const getHealth = () => jsonFetch<HealthInfo>('/api/health');
 

@@ -95,6 +95,16 @@ export interface ConfigBrave {
   pais: string;
 }
 
+/** De onde e como o app se atualiza. Mesmo contrato do Claude Indicator. */
+export interface ConfigAtualizacao {
+  /** Consultar o GitHub sozinho (no boot e a cada 6 h). */
+  verificar: boolean;
+  /** "dono/repositorio". Vazio ⇒ o padrão do projeto. */
+  repositorio: string;
+  /** Aceitar a pré-release "latest" (build de cada push), além das numeradas. */
+  preReleases: boolean;
+}
+
 export interface ConfigNavegador {
   /** Headless é mais rápido; com janela você acompanha e resolve captcha na mão. */
   headless: boolean;
@@ -132,6 +142,7 @@ export interface DiplomaConfig {
   web: ConfigWeb;
   perfil: Perfil;
   brave: ConfigBrave;
+  atualizacao: ConfigAtualizacao;
   /** Instruções livres que entram no system prompt (regras da disciplina etc). */
   instrucoes: string;
   navOrientation: NavOrientation;
@@ -267,6 +278,10 @@ export interface HealthInfo {
   cofre: { disponivel: boolean; motivo: string | null; total: number };
   navegador: { instalado: boolean; aberto: boolean };
   cwd: string;
+  /** Instalado pelo Setup (dados em %LOCALAPPDATA%) ou rodando do código-fonte. */
+  instalado: boolean;
+  /** Versão mais nova publicada no GitHub, se houver. */
+  atualizacaoDisponivel: string | null;
 }
 
 // -----------------------------------------------------------------------------

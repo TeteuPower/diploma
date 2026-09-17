@@ -7,7 +7,11 @@ import {
 } from '../lib/modo';
 import {
   patchConfig, fecharNavegador, getBrave, salvarChaveBrave, removerChaveBrave, testarBrave,
+  getAtualizacao, verificarAtualizacao, instalarAtualizacao,
+  getInstalacaoChromium, instalarChromium,
+  type EstadoAtualizacao, type InstalacaoChromium,
 } from '../api';
+import { dataHora } from '../lib/modo';
 
 const MODOS: ModoAutonomia[] = ['observar', 'assistido', 'guiado', 'autonomo'];
 
@@ -31,6 +35,34 @@ export function Config({
   const [brave, setBrave] = useState<{ configurada: boolean; pais: string } | null>(null);
   const [braveChave, setBraveChave] = useState('');
   const [braveTeste, setBraveTeste] = useState<string | null>(null);
+  const [repositorio, setRepositorio] = useState('');
+  const [atualizacao, setAtualizacao] = useState<EstadoAtualizacao | null>(null);
+  const [verificando, setVerificando] = useState(false);
+  const [instalacaoChromium, setInstalacaoChromium] = useState<InstalacaoChromium | null>(null);
+
+  // Atualização e Chromium mudam por conta própria (download em andamento):
+  // enquanto algo está rodando, a tela acompanha a cada 2 s.
+  useEffect(() => {
+    let vivo = true;
+    const ler = async () => {
+      try {
+        const [a, c] = await Promise.all([getAtualizacao(), getInstalacaoChromium()]);
+        if (!vivo) return;
+        setAtualizacao(a);
+        setInstalacaoChromium(c);
+      } catch {
+        /* servidor reiniciando durante um update: silêncio */
+      }
+    };
+    void ler();
+    const t = setInterval(() => {
+      if (atualizacao?.andamento || instalacaoChromium?.rodando) void ler();
+    }, 2000);
+    return () => {
+      vivo = false;
+      clearInterval(t);
+    };
+  }, [atualizacao?.andamento, instalacaoChromium?.rodando]);
 
   useEffect(() => {
     void getBrave().then(setBrave).catch(() => {});
@@ -46,6 +78,7 @@ export function Config({
     setInstrucoes(config.instrucoes);
     setPerfil(config.perfil);
     setListaGlobal(config.web.listaGlobal.join('\n'));
+    setRepositorio(config.atualizacao.repositorio);
   }, [config, sujo]);
 
   if (!config) return null;
@@ -68,6 +101,7 @@ export function Config({
       instrucoes,
       perfil,
       web: { ...config.web, listaGlobal: listaGlobal.split(/[\s,]+/).filter(Boolean) },
+      atualizacao: { ...config.atualizacao, repositorio: repositorio.trim() },
     });
     setSujo(false);
   };
@@ -304,6 +338,166 @@ export function Config({
             placeholder={'mercadolivre.com.br\nolx.com.br'}
           />
         </Field>
+      </Panel>
+
+      <Panel
+        title="Atualizações"
+        icon="⬆️"
+        accent={atualizacao?.disponivel ? '#f5b955' : '#38e0d8'}
+        right={
+          <span className="font-mono text-[11px] text-white/40">
+            v{atualizacao?.versaoAtual ?? '…'}
+            {atualizacao && !atualizacao.instalado ? ' · código-fonte' : ''}
+          </span>
+        }
+      >
+        <p className="mb-4 text-xs leading-relaxed text-white/45">
+          O app consulta as releases do GitHub e, se houver versão nova, baixa o instalador e roda
+          em modo silencioso: ele fecha o Diploma, troca os arquivos e reabre. Seus dados (cofre,
+          sessões, trabalhos) ficam em outra pasta e não são tocados.
+          {atualizacao && !atualizacao.instalado && (
+            <>
+              {' '}
+              <strong className="text-accent-amber/90">Rodando do código-fonte:</strong> verificar
+              funciona, instalar não — atualize com <span className="font-mono">git pull</span>.
+            </>
+          )}
+        </p>
+
+        <div className="mb-4 flex flex-col gap-2">
+          <Toggle
+            checked={config.atualizacao.verificar}
+            onChange={(v) => void salvar({ atualizacao: { ...config.atualizacao, verificar: v } })}
+            label="Verificar automaticamente"
+            hint="No início e a cada 6 horas. A API pública do GitHub permite 60 consultas por hora."
+          />
+          <Toggle
+            checked={config.atualizacao.preReleases}
+            onChange={(v) => void salvar({ atualizacao: { ...config.atualizacao, preReleases: v } })}
+            label="Aceitar a build de cada push (pré-release &quot;latest&quot;)"
+            hint="Recebe o último commit assim que ele passa no build. Sem isso, só releases numeradas."
+          />
+        </div>
+
+        <Field label="Repositório" hint="dono/repositorio no GitHub. Vazio usa o padrão do projeto.">
+          <TextInput
+            value={repositorio}
+            onChange={(e) => {
+              setRepositorio(e.target.value);
+              setSujo(true);
+            }}
+            placeholder="TeteuPower/diploma"
+          />
+        </Field>
+
+        {atualizacao?.disponivel ? (
+          <div className="mb-3 rounded-xl border border-accent-amber/30 bg-accent-amber/[0.07] p-4">
+            <div className="mb-1 text-sm font-semibold text-accent-amber">
+              Versão {atualizacao.disponivel.versao} disponível
+              <span className="ml-2 font-mono text-[11px] font-normal text-white/40">
+                {(atualizacao.disponivel.bytes / 1024 / 1024).toFixed(0)} MB
+              </span>
+            </div>
+            {atualizacao.disponivel.notas && (
+              <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap font-sans text-xs leading-relaxed text-white/60">
+                {atualizacao.disponivel.notas}
+              </pre>
+            )}
+            <a
+              href={atualizacao.disponivel.urlPagina}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[11px] text-accent/80 hover:underline"
+            >
+              ver no GitHub ↗
+            </a>
+          </div>
+        ) : (
+          atualizacao && (
+            <p className="mb-3 text-xs text-white/40">
+              Nenhuma versão mais nova
+              {atualizacao.ultimaChecagem ? ` · conferido ${dataHora(atualizacao.ultimaChecagem)}` : ''}.
+            </p>
+          )
+        )}
+
+        {atualizacao?.andamento && (
+          <div className="mb-3">
+            <div className="mb-1 flex justify-between text-[11px] text-white/50">
+              <span>{atualizacao.andamento.detalhe}</span>
+              <span>{Math.round(atualizacao.andamento.progresso * 100)}%</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-accent-amber transition-all"
+                style={{ width: `${Math.round(atualizacao.andamento.progresso * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={verificando}
+            onClick={async () => {
+              setVerificando(true);
+              try {
+                setAtualizacao(await verificarAtualizacao());
+              } catch (e) {
+                alert(e instanceof Error ? e.message : String(e));
+              } finally {
+                setVerificando(false);
+              }
+            }}
+          >
+            {verificando ? 'Verificando…' : 'Verificar agora'}
+          </button>
+          {atualizacao?.disponivel && atualizacao.instalado && (
+            <button
+              type="button"
+              className="btn-ok"
+              disabled={Boolean(atualizacao.andamento && atualizacao.andamento.fase !== 'erro')}
+              onClick={async () => {
+                if (!confirm(`Baixar e instalar a versão ${atualizacao.disponivel?.versao}? O Diploma vai fechar e reabrir sozinho.`)) return;
+                try {
+                  const r = await instalarAtualizacao();
+                  if (!r.ok) alert(r.motivo);
+                } catch (e) {
+                  alert(e instanceof Error ? e.message : String(e));
+                }
+              }}
+            >
+              Baixar e instalar
+            </button>
+          )}
+          {instalacaoChromium && !instalacaoChromium.instalado && (
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={instalacaoChromium.rodando}
+              onClick={async () => {
+                try {
+                  await instalarChromium();
+                  setInstalacaoChromium({ ...instalacaoChromium, rodando: true });
+                } catch (e) {
+                  alert(e instanceof Error ? e.message : String(e));
+                }
+              }}
+            >
+              {instalacaoChromium.rodando ? 'Baixando o Chromium…' : 'Instalar o Chromium (~150 MB)'}
+            </button>
+          )}
+        </div>
+        {instalacaoChromium?.rodando && instalacaoChromium.saida.length > 0 && (
+          <pre className="mt-3 max-h-28 overflow-auto rounded-lg bg-black/40 p-2 font-mono text-[10px] text-white/50">
+            {instalacaoChromium.saida.slice(-6).join('\n')}
+          </pre>
+        )}
+        {instalacaoChromium?.ok === false && (
+          <p className="mt-2 text-xs text-accent-rose">A instalação do Chromium falhou — veja o log.</p>
+        )}
       </Panel>
 
       <Panel title="Brave Search" icon="🦁" accent="#fb542b">

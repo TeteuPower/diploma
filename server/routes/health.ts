@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
-import { VERSION, PROJECT_ROOT } from '../env';
+import { VERSION, PROJECT_ROOT, INSTALADO } from '../env';
+import { estado as estadoAtualizacao } from '../atualizacao';
 import { resolverAuth } from '../authState';
 import * as cofre from '../cofre';
 import * as nav from '../navegador';
@@ -31,6 +32,8 @@ healthRouter.get('/', (_req, res) => {
     cofre: { disponivel: d.ok, motivo: d.motivo, total: cofre.total() },
     navegador: { instalado: navegadorInstalado(), aberto: nav.estaAberto() },
     cwd: PROJECT_ROOT,
+    instalado: INSTALADO,
+    atualizacaoDisponivel: estadoAtualizacao().disponivel?.versao ?? null,
   };
   res.json(info);
 });

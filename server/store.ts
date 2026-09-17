@@ -80,6 +80,7 @@ export async function initStore(): Promise<void> {
     web: { ...DEFAULT_CONFIG.web, ...configFile.get().web },
     perfil: { ...DEFAULT_CONFIG.perfil, ...configFile.get().perfil },
     brave: { ...DEFAULT_CONFIG.brave, ...configFile.get().brave },
+    atualizacao: { ...DEFAULT_CONFIG.atualizacao, ...configFile.get().atualizacao },
   };
   configFile.setSync(merged);
   await configFile.flush();
@@ -103,6 +104,7 @@ export async function patchConfig(patch: Partial<DiplomaConfig>): Promise<Diplom
     web: patch.web ? { ...atual.web, ...patch.web } : atual.web,
     perfil: patch.perfil ? { ...atual.perfil, ...patch.perfil } : atual.perfil,
     brave: patch.brave ? { ...atual.brave, ...patch.brave } : atual.brave,
+    atualizacao: patch.atualizacao ? { ...atual.atualizacao, ...patch.atualizacao } : atual.atualizacao,
   };
   configFile.setSync(next);
   await configFile.flush();

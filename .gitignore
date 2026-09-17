@@ -7,3 +7,9 @@ trabalhos/
 *.tsbuildinfo
 .env
 .DS_Store
+
+# Saida do empacotamento (build.ps1)
+publish/
+dist/
+.cache/
+.build-smoke/

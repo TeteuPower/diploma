@@ -1,0 +1,129 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Dependências
+        run: npm ci --no-audit --no-fund
+
+      # Os testes de navegador precisam do Chromium (~150 MB por run) e do LMS falso; o
+      # teste rápido cobre o que não depende dele: cofre, servidor MCP, pasta de trabalhos,
+      # comparador de versões. O typecheck roda dentro do build.ps1.
+      - name: Testes rápidos
+        run: npm run teste:rapido
+
+      - name: Instalar o Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress --yes
+
+      - name: Empacotar e gerar o instalador
+        shell: pwsh
+        run: .\build.ps1 -SemTestes
+
+      - name: Publicar o instalador como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: Diploma-instalador
+          path: dist/Diploma-Setup-*.exe
+          if-no-files-found: error
+
+      # Todo push na master atualiza a pré-release "latest": o instalador do último commit
+      # fica sempre disponível na caixa Releases do repositório. Atualizar no lugar (em vez
+      # de apagar e recriar) mantém o link estável.
+      - name: Atualizar a release "latest"
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $setup = (Get-ChildItem dist\Diploma-Setup-*.exe | Select-Object -First 1).FullName
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $title = "Build $version (master)"
+          $notes = "Instalador gerado automaticamente a partir do ultimo commit na master (versao $version). Para versoes estaveis, use as releases numeradas."
+
+          # A API do GitHub devolve 503 de vez em quando. Cada chamada tem nova tentativa, e
+          # nenhuma delas apaga nada: subir com --clobber e editar sao idempotentes.
+          function Invoke-Gh {
+            param([string[]]$GhArgs, [int]$Tries = 3)
+            for ($i = 1; $i -le $Tries; $i++) {
+              $out = & gh @GhArgs 2>&1
+              if ($LASTEXITCODE -eq 0) { return $true }
+              Write-Host "tentativa $i de $Tries falhou: $out"
+              if ($i -lt $Tries) { Start-Sleep -Seconds (5 * $i) }
+            }
+            return $false
+          }
+
+          $exists = Invoke-Gh @('release', 'view', 'latest', '--json', 'tagName') -Tries 2
+
+          if (-not $exists) {
+            Write-Host "criando a release latest"
+            if (-not (Invoke-Gh @('release', 'create', 'latest', $setup, '--prerelease', '--title', $title, '--notes', $notes))) {
+              Write-Host "create nao passou; tentando atualizar no lugar"
+              $exists = $true
+            }
+          }
+
+          # O instalador e o unico passo obrigatorio: o nome dele carrega a versao que o app le.
+          if ($exists) {
+            Write-Host "atualizando a release latest"
+            if (-not (Invoke-Gh @('release', 'upload', 'latest', $setup, '--clobber'))) { throw "falha ao enviar o instalador" }
+          }
+
+          # --clobber so substitui arquivo de mesmo nome, e o nome carrega a versao: sem limpar,
+          # a release acumula um .exe por build. O app pegaria o maior mesmo assim, mas nao
+          # precisa carregar lixo.
+          $current = Split-Path $setup -Leaf
+          $names = & gh release view latest --json assets --jq '.assets[].name'
+          if ($LASTEXITCODE -eq 0) {
+            foreach ($name in $names) {
+              if ($name -and $name -ne $current -and $name -like 'Diploma-Setup-*.exe') {
+                Write-Host "removendo instalador antigo: $name"
+                if (-not (Invoke-Gh @('release', 'delete-asset', 'latest', $name, '--yes') -Tries 2)) {
+                  Write-Host "::warning::nao consegui remover $name"
+                }
+              }
+            }
+          }
+
+          if ($exists) {
+            if (-not (Invoke-Gh @('release', 'edit', 'latest', '--title', $title, '--notes', $notes, '--prerelease') -Tries 2)) {
+              Write-Host "::warning::titulo da release nao atualizado (o instalador ja esta correto)"
+            }
+          }
+
+          Write-Host "release latest publicada com $current"
+
+      # Só em tags v*: release numerada, estável, marcada como latest da página.
+      - name: Criar a release numerada
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $setup = (Get-ChildItem dist\Diploma-Setup-*.exe | Select-Object -First 1).FullName
+          gh release create $env:GITHUB_REF_NAME $setup `
+            --title "Diploma $env:GITHUB_REF_NAME" `
+            --generate-notes `
+            --latest

@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { join, resolve, dirname, relative, sep } from 'node:path';
-import { PROJECT_ROOT } from './env';
+import { TRABALHOS_DIR } from './env';
 import { log, aviso } from './log';
 
 /**
@@ -17,7 +17,8 @@ import { log, aviso } from './log';
  * virar lixo.
  */
 
-export const RAIZ_TRABALHOS = join(PROJECT_ROOT, 'trabalhos');
+// Em dev, trabalhos/ na raiz do repo; instalado, %LOCALAPPDATA%\Diploma\trabalhos.
+export const RAIZ_TRABALHOS = TRABALHOS_DIR;
 
 /**
  * Onde moram os recados para o dono — e **fora** das pastas de entrega.

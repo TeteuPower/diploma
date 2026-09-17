@@ -27,6 +27,7 @@ export const DEFAULT_CONFIG: DiplomaConfig = {
   },
   perfil: { nome: '', cep: '', endereco: '', cidade: '', uf: '', telefone: '', email: '' },
   brave: { pais: 'BR' },
+  atualizacao: { verificar: true, repositorio: 'TeteuPower/diploma', preReleases: false },
   modelo: 'default',
   esforco: 'medium',
   instrucoes: '',

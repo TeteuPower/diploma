@@ -79,6 +79,17 @@ function limpar(bruto: unknown): Partial<DiplomaConfig> {
     };
   }
 
+  if (b.atualizacao && typeof b.atualizacao === 'object') {
+    const at = b.atualizacao as Record<string, unknown>;
+    const repo = typeof at.repositorio === 'string' ? at.repositorio.trim() : '';
+    out.atualizacao = {
+      verificar: at.verificar !== false,
+      // "dono/repo" e nada mais: não deixamos uma URL inteira virar parte da URL da API.
+      repositorio: /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) ? repo : '',
+      preReleases: Boolean(at.preReleases),
+    };
+  }
+
   if (b.brave && typeof b.brave === 'object') {
     const br = b.brave as Record<string, unknown>;
     out.brave = { pais: typeof br.pais === 'string' ? br.pais.trim().toUpperCase().slice(0, 2) : '' };

@@ -86,6 +86,22 @@ export function Layout({
 
         {/* Rodapé: só dado real, nada inventado. */}
         <div className="flex flex-col gap-1.5 border-t border-white/5 px-5 py-4">
+          {/* Versão instalada e, quando houver, a nova — clicável, leva à Configuração. */}
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="font-mono text-[11px] text-white/35" title={health?.instalado ? 'Instalado pelo Setup' : 'Rodando do código-fonte'}>
+              v{health?.version ?? '…'}{health && !health.instalado ? ' · fonte' : ''}
+            </span>
+            {health?.atualizacaoDisponivel && (
+              <button
+                type="button"
+                onClick={() => onNavigate('config')}
+                className="rounded-full bg-accent-amber/20 px-2 py-0.5 text-[10px] font-semibold text-accent-amber hover:bg-accent-amber/30"
+                title="Nova versão disponível — abrir Configuração → Atualizações"
+              >
+                v{health.atualizacaoDisponivel} disponível
+              </button>
+            )}
+          </div>
           <Indicador
             ok={conectado}
             texto={conectado ? 'ao vivo' : 'reconectando…'}
