@@ -174,12 +174,27 @@ export function criarServidorLms(sessaoId: string) {
   const olhar = ferramenta(
     'olhar',
     'Tira um instantâneo do que está na tela agora: a árvore de elementos com os refs ' +
-      '(ref=e12) que você usa para agir. Use depois de qualquer mudança que você não causou.',
-    {},
-    async () => {
+      '(ref=e12) que você usa para agir. Use depois de qualquer mudança que você não causou. ' +
+      'Em página longa (listagem de loja, resultado de busca) passe `filtro` — ex. "R$" para ver só ' +
+      'as linhas com preço, ou o nome do produto — em vez de ler tudo; e `maxLinhas` se o ' +
+      'instantâneo vier cortado.',
+    {
+      filtro: z.string().optional().describe('Só linhas que contêm este texto (sem diferenciar maiúsculas)'),
+      maxLinhas: z.number().min(50).max(1500).optional().describe('Teto de linhas; padrão 400'),
+    },
+    async ({ filtro, maxLinhas }) => {
       try {
-        const snap = await nav.instantaneo();
-        await appendPasso(sessaoId, 'leu', 'Leu a página', {
+        let snap = await nav.instantaneo(maxLinhas ?? 400);
+        if (filtro?.trim()) {
+          // Cabeçalho (URL/título) e rodapé (contagem/corte) ficam; o meio é peneirado.
+          const linhas = snap.split('\n');
+          const alvo = filtro.trim().toLowerCase();
+          const cabecalho = linhas.slice(0, 2);
+          const rodape = linhas.filter((l) => l.startsWith('['));
+          const meio = linhas.slice(2).filter((l) => !l.startsWith('[') && l.toLowerCase().includes(alvo));
+          snap = [...cabecalho, '', `(filtro "${filtro.trim()}": ${meio.length} linha(s))`, ...meio, '', ...rodape].join('\n');
+        }
+        await appendPasso(sessaoId, 'leu', filtro ? `Leu a página filtrando por "${filtro}"` : 'Leu a página', {
           ferramenta: 'olhar',
           url: nav.urlAtual() ?? undefined,
         });

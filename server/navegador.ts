@@ -214,6 +214,19 @@ export async function instantaneo(maxLinhas = 400): Promise<string> {
     /* página lenta: seguimos com o que já renderizou */
   }
 
+  let texto = await coletarTudo(page, maxLinhas, medir);
+  // Zero acionável numa página que tem corpo é quase sempre render tardio,
+  // não página vazia de verdade. Uma segunda chance barata evita o turno perdido.
+  if (texto.includes('[0 elementos acionáveis]')) {
+    await page.waitForTimeout(900);
+    const segunda = await coletarTudo(page, maxLinhas, medir);
+    if (!segunda.includes('[0 elementos acionáveis]')) texto = segunda;
+  }
+  return texto;
+}
+
+async function coletarTudo(page: Page, maxLinhas: number, medir: () => number): Promise<string> {
+
   const frames = page.frames();
   const blocos: string[] = [];
   let total = 0;
@@ -308,6 +321,10 @@ export async function navegar(url: string): Promise<void> {
   }
   const medir = cronometro();
   await page.goto(absoluta, { waitUntil: 'domcontentloaded' });
+  // Marketplace e SPA pintam a página DEPOIS do domcontentloaded: um instantâneo
+  // tirado aos 13 ms voltava "página sem conteúdo legível" e o agente gastava um
+  // turno só para olhar de novo. Esperar a rede assentar resolve o caso comum.
+  await assentar();
   log('navegador', 'navegou', { url: absoluta, ms: medir() });
 }
 
