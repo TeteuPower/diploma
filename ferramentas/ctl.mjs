@@ -12,7 +12,9 @@
  *   node ferramentas/ctl.mjs status
  *   node ferramentas/ctl.mjs log [n] [filtro]
  *   node ferramentas/ctl.mjs seguir [filtro]     # acompanha ao vivo
- *   node ferramentas/ctl.mjs nova "<objetivo>"
+ *   node ferramentas/ctl.mjs nova "<objetivo>" [--lms|--web] [--aberto|--lista=a.com,b.com]
+ *   node ferramentas/ctl.mjs achados [id]          # o que ele encontrou, com fonte
+ *   node ferramentas/ctl.mjs brave chave <k> | pais <BR> | testar | remover
  *   node ferramentas/ctl.mjs passos [id] [n]
  *   node ferramentas/ctl.mjs pendente
  *   node ferramentas/ctl.mjs aprovar [observação]
@@ -139,10 +141,76 @@ try {
       break;
 
     case 'nova': {
-      const objetivo = resto.join(' ').trim();
+      // Flags saem do texto; o que sobra é o objetivo.
+      let missao = 'lms';
+      let dominios;
+      const palavras = [];
+      for (const w of resto) {
+        if (w === '--web') missao = 'web';
+        else if (w === '--lms') missao = 'lms';
+        else if (w === '--aberto') dominios = { modo: 'aberto', hosts: [] };
+        else if (w.startsWith('--lista=')) dominios = { modo: 'lista', hosts: w.slice(8).split(',').filter(Boolean) };
+        else palavras.push(w);
+      }
+      const objetivo = palavras.join(' ').trim();
       if (!objetivo) throw new Error('faltou o objetivo');
-      const s = await api('/sessoes', { method: 'POST', body: JSON.stringify({ objetivo }) });
-      console.log(`criada ${s.id}\nobjetivo: ${s.objetivo}`);
+      const s = await api('/sessoes', {
+        method: 'POST',
+        body: JSON.stringify({ objetivo, missao, dominios }),
+      });
+      console.log(
+        `criada ${s.id} · ${s.missao} · domínios ${s.dominios.modo}` +
+          (s.dominios.hosts.length ? ` (${s.dominios.hosts.join(', ')})` : '') +
+          `\nobjetivo: ${s.objetivo}`,
+      );
+      break;
+    }
+
+    case 'achados': {
+      const id = resto[0]?.startsWith('ses-') ? resto[0] : (await sessaoAtual())?.id;
+      const lista = await api(`/achados${id ? `?sessao=${id}` : ''}`);
+      if (!lista.length) {
+        console.log('nenhum achado' + (id ? ` na sessão ${id}` : ''));
+        break;
+      }
+      const porTipo = {};
+      for (const a of lista) (porTipo[a.tipo] ??= []).push(a);
+      for (const [tipo, itens] of Object.entries(porTipo)) {
+        console.log(`\n${tipo.toUpperCase()} (${itens.length})`);
+        const ordenados =
+          tipo === 'produto'
+            ? [...itens].sort((x, y) => (Number(x.dados.preco) || Infinity) - (Number(y.dados.preco) || Infinity))
+            : itens;
+        for (const a of ordenados) {
+          const preco = tipo === 'produto' && a.dados.preco != null ? `R$ ${a.dados.preco}  ` : '';
+          console.log(`  ${preco}${a.titulo}  [${a.confianca}]`);
+          console.log(`     ${cortar(a.resumo, 140)}`);
+          console.log(`     ${a.fonte}`);
+        }
+      }
+      break;
+    }
+
+    case 'brave': {
+      const [sub, ...args] = resto;
+      if (sub === 'chave') {
+        const chave = args.join(' ').trim();
+        if (!chave) throw new Error('faltou a chave');
+        await api('/brave/chave', { method: 'POST', body: JSON.stringify({ chave }) });
+        console.log('chave guardada no cofre');
+      } else if (sub === 'pais') {
+        await api('/config', { method: 'PATCH', body: JSON.stringify({ brave: { pais: args[0] ?? '' } }) });
+        console.log(`país: ${args[0] ?? '(global)'}`);
+      } else if (sub === 'remover') {
+        await api('/brave/chave', { method: 'DELETE' });
+        console.log('chave removida');
+      } else if (sub === 'testar') {
+        const r = await api('/brave/testar', { method: 'POST' });
+        console.log(r.ok ? `\x1b[32mok\x1b[0m: ${r.detalhe}` : `\x1b[31mfalhou\x1b[0m: ${r.detalhe}`);
+        for (const a of r.amostra ?? []) console.log(`  - ${a.titulo}\n    ${a.url}`);
+      } else {
+        console.log(JSON.stringify(await api('/brave'), null, 2));
+      }
       break;
     }
 

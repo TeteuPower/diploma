@@ -142,6 +142,61 @@ quebram isso em silêncio, e as duas já morderam:
   browser. Por isso `fonteInstantaneo()` injeta um shim e **falha alto** se o transpilador passar a
   injetar outro helper, em vez de devolver instantâneo vazio.
 
+## Missões: LMS é um módulo, web é outro
+
+Cada sessão nasce com uma **missão** (`lms` | `web`) e uma **política de domínio**. A missão troca
+a seção do system prompt ([server/agente.ts](server/agente.ts): `secaoLms` / `secaoWeb`) e o que
+o agente tem em foco; o núcleo — instantâneo, portão, cofre, log — é o mesmo.
+
+### Política de domínio, em três formatos
+
+A parede continua sendo código ([server/navegador.ts](server/navegador.ts) `permitido()`), mas
+agora tem três formatos, escolhidos por sessão e parametrizáveis na Configuração:
+
+| modo | passa |
+|---|---|
+| `restrito` | só o alvo LMS e subdomínios — a fronteira original; **LMS é sempre restrito** |
+| `lista` | só os hosts da missão, ou a `listaGlobal` da config quando a missão não trouxe a sua |
+| `aberto` | qualquer site https — o padrão de missão web, porque "encontre tudo sobre" não cabe numa allowlist |
+
+O que **não muda em nenhum modo**, e é o que de fato protege o dono: nada de http em claro (só
+localhost, para os testes), e **credencial do cofre só é digitada no host a que pertence** — isso
+vive em `cofre.paraUrl`, não na política. Abrir a política não abre o cofre.
+
+A política em vigor é global no navegador (`definirPolitica`), definida quando a sessão começa e
+devolvida ao restrito quando termina. Por isso **uma sessão roda por vez**: o navegador é um só e
+duas sessões disputariam a página e herdariam a fronteira uma da outra. A segunda recebe 409.
+
+### Achados
+
+[server/achados.ts](server/achados.ts). O relato final é a conclusão em prosa; o achado é o
+material que a sustenta — cada oferta, fato ou documento com a **URL de onde veio**. A ferramenta
+`registrar_achado` recusa sem fonte: sem fonte não é achado, é palpite. A página **Achados**
+reagrupa: produto vira tabela ordenada por `dados.preco`, o resto vira cartão com a fonte ao lado.
+Chegam ao vivo pelo mesmo SSE das sessões.
+
+### Perfil e `dados_pessoais`
+
+Endereço, CEP, cidade — o que um site pede para calcular frete ou filtrar por região. Não é segredo
+como a senha (o agente precisa **ver** para digitar), então fica na config; mas é dado pessoal, e
+por isso a ferramenta `dados_pessoais` grava cada leitura na trilha e no log (`AVISO [perfil]`).
+
+### Brave Search
+
+[server/brave.ts](server/brave.ts). Abrir buscador pelo Chromium funciona, mas é lento e esbarra em
+captcha. A API devolve dez links em meio segundo. A chave é segredo e mora no **cofre** (host
+`api.search.brave.com`), cifrada pelo DPAPI como uma senha qualquer: sai do cofre, vai no header
+para a Brave e acaba ali — **nunca entra no contexto da LLM**, que só recebe título, URL e
+descrição. Nenhuma rota devolve a chave; a Configuração só diz "configurada" e oferece "Testar".
+
+### O limite legal — decisão do dono
+
+Para busca sobre pessoas, o dono escolheu "sem limite além da lei" e assumiu a responsabilidade
+pelo uso. Isso está no prompt web (`## O que a lei permite, e só isso`) e vale ser repetido aqui:
+o agente acessa o que está público ou o que é conta do próprio dono; não burla autenticação,
+paywall ou captcha de terceiros, não acessa conta alheia, não explora falha de site. Esse limite
+não é configurável.
+
 ## O canal de controle (`ctl`)
 
 A interface é para o dono. Para desenvolver existe [ferramentas/ctl.mjs](ferramentas/ctl.mjs), que

@@ -6,6 +6,9 @@ import type {
   HealthInfo,
   SessaoStreamEvent,
   PainelEntrega,
+  TipoMissao,
+  PoliticaDominio,
+  Achado,
 } from '@shared/types';
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
@@ -39,8 +42,15 @@ export const removerCredencial = (id: string) =>
 
 // --- Sessões ---
 export const getSessoes = () => jsonFetch<Sessao[]>('/api/sessoes');
-export const criarSessao = (objetivo: string) =>
-  jsonFetch<Sessao>('/api/sessoes', { method: 'POST', body: JSON.stringify({ objetivo }) });
+export const criarSessao = (
+  objetivo: string,
+  missao: TipoMissao = 'lms',
+  dominios?: Partial<PoliticaDominio>,
+) =>
+  jsonFetch<Sessao>('/api/sessoes', {
+    method: 'POST',
+    body: JSON.stringify({ objetivo, missao, dominios }),
+  });
 export const retomarSessao = (id: string) =>
   jsonFetch<{ ok: boolean }>(`/api/sessoes/${id}/retomar`, { method: 'POST' });
 export const pararSessao = (id: string) =>
@@ -59,6 +69,26 @@ export const responderAprovacao = (
   });
 export const fecharNavegador = () =>
   jsonFetch<{ ok: boolean }>('/api/sessoes/navegador/fechar', { method: 'POST' });
+
+// --- Achados (o que ele encontrou, com fonte) ---
+export const getAchados = (sessao?: string) =>
+  jsonFetch<Achado[]>(`/api/achados${sessao ? `?sessao=${encodeURIComponent(sessao)}` : ''}`);
+export const removerAchado = (id: string) =>
+  jsonFetch<void>(`/api/achados/${id}`, { method: 'DELETE' });
+
+// --- Brave Search (a chave vai para o cofre; nunca desce) ---
+export const getBrave = () => jsonFetch<{ configurada: boolean; pais: string }>('/api/brave');
+export const salvarChaveBrave = (chave: string) =>
+  jsonFetch<{ configurada: boolean }>('/api/brave/chave', {
+    method: 'POST',
+    body: JSON.stringify({ chave }),
+  });
+export const removerChaveBrave = () => jsonFetch<void>('/api/brave/chave', { method: 'DELETE' });
+export const testarBrave = () =>
+  jsonFetch<{ ok: boolean; detalhe: string; amostra: { titulo: string; url: string }[] }>(
+    '/api/brave/testar',
+    { method: 'POST' },
+  );
 
 // --- Entrega (conferido no disco, não relatado pelo agente) ---
 export const getEntrega = () => jsonFetch<PainelEntrega>('/api/entrega');

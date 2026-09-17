@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { getConfig, patchConfig } from '../store';
+import { normalizarHost } from '../hosts';
 import { ACOES_SENSIVEIS } from '../../shared/types';
 import type { DiplomaConfig, AcaoSensivel, ModoAutonomia } from '../../shared/types';
 
 export const configRouter = Router();
 
 const MODOS: ModoAutonomia[] = ['observar', 'assistido', 'guiado', 'autonomo'];
+
 
 /** Sanitiza o PATCH: nada entra na config sem passar por aqui. */
 function limpar(bruto: unknown): Partial<DiplomaConfig> {
@@ -48,6 +50,39 @@ function limpar(bruto: unknown): Partial<DiplomaConfig> {
     out.tentativasPorQuiz = Math.min(10, Math.max(1, Math.round(b.tentativasPorQuiz)));
   }
   if (typeof b.permitirEntrega === 'boolean') out.permitirEntrega = b.permitirEntrega;
+
+  if (b.web && typeof b.web === 'object') {
+    const w = b.web as Record<string, unknown>;
+    out.web = {
+      politicaPadrao: w.politicaPadrao === 'lista' ? 'lista' : 'aberto',
+      listaGlobal: Array.isArray(w.listaGlobal)
+        ? w.listaGlobal
+            .filter((h): h is string => typeof h === 'string')
+            .map(normalizarHost)
+            .filter(Boolean)
+            .slice(0, 200)
+        : [],
+    };
+  }
+
+  if (b.perfil && typeof b.perfil === 'object') {
+    const pf = b.perfil as Record<string, unknown>;
+    const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+    out.perfil = {
+      nome: str(pf.nome, 120),
+      cep: str(pf.cep, 12),
+      endereco: str(pf.endereco, 200),
+      cidade: str(pf.cidade, 80),
+      uf: str(pf.uf, 2).toUpperCase(),
+      telefone: str(pf.telefone, 30),
+      email: str(pf.email, 120),
+    };
+  }
+
+  if (b.brave && typeof b.brave === 'object') {
+    const br = b.brave as Record<string, unknown>;
+    out.brave = { pais: typeof br.pais === 'string' ? br.pais.trim().toUpperCase().slice(0, 2) : '' };
+  }
   if (typeof b.modelo === 'string') out.modelo = b.modelo as DiplomaConfig['modelo'];
   if (b.esforco === 'low' || b.esforco === 'medium' || b.esforco === 'high') out.esforco = b.esforco;
   if (typeof b.instrucoes === 'string') out.instrucoes = b.instrucoes.slice(0, 8000);

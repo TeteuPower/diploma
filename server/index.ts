@@ -7,6 +7,7 @@ import { initCofre, disponivel as cofreDisponivel, total as totalCredenciais } f
 import { limparPendentes } from './aprovacao';
 import { initTentativas } from './tentativas';
 import { initTrabalhos } from './trabalhos';
+import { initAchados } from './achados';
 import * as nav from './navegador';
 import './sse';
 import { configRouter } from './routes/config';
@@ -16,6 +17,8 @@ import { tentativasRouter } from './routes/tentativas';
 import { debugRouter } from './routes/debug';
 import { revisaoRouter } from './routes/revisao';
 import { entregaRouter } from './routes/entrega';
+import { achadosRouter } from './routes/achados';
+import { braveRouter } from './routes/brave';
 import { healthRouter } from './routes/health';
 
 async function main() {
@@ -23,6 +26,7 @@ async function main() {
   await initCofre();
   await initTentativas();
   await initTrabalhos();
+  await initAchados();
   limparPendentes();
   const orfas = await recuperarOrfas();
 
@@ -36,6 +40,8 @@ async function main() {
   app.use('/api/debug', debugRouter);
   app.use('/api/revisao', revisaoRouter);
   app.use('/api/entrega', entregaRouter);
+  app.use('/api/achados', achadosRouter);
+  app.use('/api/brave', braveRouter);
   app.use('/api/health', healthRouter);
 
   app.use('/api', (_req, res) => res.status(404).json({ error: 'rota não encontrada' }));

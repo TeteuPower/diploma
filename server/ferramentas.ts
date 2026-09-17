@@ -3,12 +3,14 @@ import { z } from 'zod';
 import * as nav from './navegador';
 import * as cofre from './cofre';
 import { avaliar, pedir } from './aprovacao';
-import { appendPasso, getConfig } from './store';
+import { appendPasso, getConfig, getSessao } from './store';
 import type { AcaoSensivel } from '../shared/types';
 import * as tentativas from './tentativas';
 import * as trabalhos from './trabalhos';
 import { gerarPdf } from './pdf';
 import { compactar } from './compactar';
+import * as achados from './achados';
+import * as brave from './brave';
 import { log, aviso, erro as logErro, cronometro } from './log';
 
 export const SERVIDOR_MCP = 'lms';
@@ -108,7 +110,10 @@ export function criarServidorLms(sessaoId: string) {
     // sai desta máquina para o LMS. Perguntar ao dono seria perder o ponto —
     // ele já respondeu quando deixou a trava fechada.
     const ENTREGA: AcaoSensivel[] = ['submeter', 'enviar_arquivo', 'marcar_concluido'];
-    if (ENTREGA.includes(acao as AcaoSensivel) && !getConfig().permitirEntrega) {
+    // A trava é do módulo LMS. Numa missão web, o que segura compra, mensagem
+    // ou publicação é o portão de aprovação do modo — logo abaixo.
+    const ehLms = getSessao(sessaoId)?.missao !== 'web';
+    if (ehLms && ENTREGA.includes(acao as AcaoSensivel) && !getConfig().permitirEntrega) {
       const motivo =
         'a trava de entrega está fechada (permitirEntrega=false): produzir arquivo pode, ' +
         'enviar para o LMS não. Termine os arquivos em trabalhos/ e relate — o dono revisa ' +
@@ -146,9 +151,10 @@ export function criarServidorLms(sessaoId: string) {
 
   const abrir = ferramenta(
     'abrir',
-    'Abre o navegador e vai até uma URL do LMS. Aceita caminho relativo (/curso/123) ' +
-      'ou URL completa. Só navega dentro do domínio configurado. Devolve o instantâneo da página.',
-    { url: z.string().describe('URL completa ou caminho relativo dentro do LMS') },
+    'Abre o navegador e vai até uma URL. Aceita URL completa ou, numa missão LMS, caminho ' +
+      'relativo (/curso/123). Só navega dentro da política de domínio da sessão — fora dela ' +
+      'recusa e explica o motivo. Devolve o instantâneo da página.',
+    { url: z.string().describe('URL completa (https) ou caminho relativo ao alvo LMS') },
     async ({ url }) => {
       try {
         await nav.navegar(url);
@@ -641,6 +647,91 @@ export function criarServidorLms(sessaoId: string) {
   );
 
   // -------------------------------------------------------------------------
+  // Pesquisa: achados e perfil
+  // -------------------------------------------------------------------------
+
+  const registrarAchado = ferramenta(
+    'registrar_achado',
+    'Registra algo que você encontrou, com a URL de onde veio. É o que o dono confere depois, ' +
+      'item a item, na página Achados. Produto: ponha o preço como NÚMERO em dados.preco ' +
+      '(ex. 2899.9), mais vendedor, condicao, frete, site, link. Sem fonte não é achado.',
+    {
+      tipo: z.enum(['produto', 'fato', 'documento', 'pessoa', 'contato', 'outro']),
+      titulo: z.string().describe('Curto e específico, ex.: "Galaxy Tab S8 128GB Wi-Fi — Mercado Livre"'),
+      resumo: z.string().describe('O que é e por que importa, em 1-3 frases'),
+      dados: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+        .default({})
+        .describe('Campos estruturados: preco, vendedor, condicao, frete, link, data...'),
+      fonte: z.string().describe('URL exata da página onde você viu isto'),
+      confianca: z.enum(['alta', 'media', 'baixa']).default('media'),
+    },
+    async ({ tipo, titulo, resumo, dados, fonte, confianca }) => {
+      try {
+        new URL(fonte);
+      } catch {
+        return texto(`ERRO: "fonte" precisa ser uma URL válida (recebi "${fonte}"). Sem fonte não é achado.`);
+      }
+      const a = await achados.registrar({ sessaoId, tipo, titulo, resumo, dados, fonte, confianca });
+      await appendPasso(sessaoId, 'agiu', `Registrou achado (${tipo}): ${a.titulo}`, {
+        ferramenta: 'registrar_achado',
+        url: fonte,
+      });
+      return texto(`achado ${a.id} registrado.`);
+    },
+  );
+
+  const dadosPessoais = ferramenta(
+    'dados_pessoais',
+    'Devolve os dados pessoais que o dono preencheu no perfil (nome, CEP, endereço, cidade...), ' +
+      'para você digitar num site que pede região ou identificação. Cada leitura fica na trilha. ' +
+      'Use só o campo que a tarefa pede.',
+    { porque: z.string().describe('Para que você precisa disso agora') },
+    async ({ porque }) => {
+      const perfil = getConfig().perfil;
+      const preenchidos = Object.entries(perfil).filter(([, v]) => typeof v === 'string' && v.trim());
+      if (!preenchidos.length) {
+        return texto('O dono não preencheu dados pessoais na Configuração. Use `perguntar` se um site exigir.');
+      }
+      await appendPasso(sessaoId, 'leu', `Leu seus dados pessoais — ${porque}`, {
+        ferramenta: 'dados_pessoais',
+        url: nav.urlAtual() ?? undefined,
+      });
+      aviso('perfil', 'dados pessoais lidos pelo agente', {
+        porque: porque.slice(0, 120),
+        campos: preenchidos.map(([k]) => k),
+      });
+      return texto(preenchidos.map(([k, v]) => `${k}: ${v}`).join('\n'));
+    },
+  );
+
+  const buscarWeb = ferramenta(
+    'buscar_web',
+    'Busca na web pela API do Brave e devolve título, URL e descrição dos resultados — sem abrir ' +
+      'buscador no navegador, sem captcha. Use para descobrir ONDE procurar; depois `abrir` a página ' +
+      'certa e leia de verdade. Resultado de busca não é achado: registre só o que confirmar na página.',
+    {
+      consulta: z.string().describe('Termos da busca, como você digitaria no buscador'),
+      quantidade: z.number().min(1).max(20).default(10),
+    },
+    async ({ consulta, quantidade }) => {
+      try {
+        const itens = await brave.buscar(consulta, quantidade);
+        await appendPasso(sessaoId, 'leu', `Buscou na web: "${consulta}" (${itens.length} resultados)`, {
+          ferramenta: 'buscar_web',
+        });
+        if (!itens.length) return texto(`Nenhum resultado para "${consulta}".`);
+        return texto(itens.map((r, i) => `${i + 1}. ${r.titulo}\n   ${r.url}\n   ${r.descricao}`).join('\n\n'));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return texto(
+          `ERRO: ${msg}${msg.includes('não configurado') ? ' Enquanto isso, abra duckduckgo.com pelo navegador.' : ''}`,
+        );
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // Diálogo com o dono
   // -------------------------------------------------------------------------
 
@@ -680,7 +771,7 @@ export function criarServidorLms(sessaoId: string) {
       abrir, olhar, capturar, rolar, voltar, esperar,
       clicar, escreverCampo, escolher,
       entrar, submeter,
-      escrever, lerArquivo, listarArquivos, apagarArquivo, baixarAnexo, gerarPdfTool, compactarTool, notaTool, revisarTool,
+      escrever, lerArquivo, listarArquivos, apagarArquivo, baixarAnexo, gerarPdfTool, compactarTool, notaTool, revisarTool, registrarAchado, dadosPessoais, buscarWeb,
       perguntar, anotar,
     ],
   });
@@ -691,6 +782,6 @@ export const FERRAMENTAS_LMS = [
   'abrir', 'olhar', 'capturar', 'rolar', 'voltar', 'esperar',
   'clicar', 'escrever', 'escolher',
   'entrar', 'submeter',
-  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'apagar_arquivo', 'baixar_anexo', 'gerar_pdf', 'compactar', 'nota_para_dono', 'revisar_entregaveis',
+  'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'apagar_arquivo', 'baixar_anexo', 'gerar_pdf', 'compactar', 'nota_para_dono', 'revisar_entregaveis', 'registrar_achado', 'dados_pessoais', 'buscar_web',
   'perguntar', 'anotar',
 ].map((n) => `mcp__${SERVIDOR_MCP}__${n}`);

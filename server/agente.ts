@@ -8,7 +8,9 @@ import * as cofre from './cofre';
 import {
   getConfig, getSessao, createSessao, patchSessao, appendPasso, agora, genId,
 } from './store';
-import type { ModoAutonomia, Sessao } from '../shared/types';
+import type { ModoAutonomia, Sessao, TipoMissao, PoliticaDominio, DiplomaConfig } from '../shared/types';
+import { normalizarHost } from './hosts';
+import { configurada as braveConfigurada } from './brave';
 
 /**
  * O agente: uma query() do Agent SDK com o servidor MCP do LMS acoplado.
@@ -51,40 +53,22 @@ const REGRAS_POR_MODO: Record<ModoAutonomia, string> = {
     'vezes antes de submeter qualquer coisa — não há ninguém entre você e o envio.',
 };
 
-function montarPrompt(sessao: Sessao): string {
-  const cfg = getConfig();
-  const modo = modoEfetivo();
+/** A parte do prompt que só o módulo LMS tem. */
+function secaoLms(cfg: DiplomaConfig): string[] {
   const cred = cfg.alvo.urlBase ? cofre.paraUrl(cfg.alvo.urlBase) : undefined;
-
   return [
-    'Você opera um LMS (ambiente virtual de aprendizagem) por dentro de um navegador real,',
-    'em nome do dono desta máquina, na conta dele.',
-    '',
-    `## Alvo`,
+    '## Alvo',
     `- Plataforma: ${cfg.alvo.nome || '(sem nome)'}`,
-    `- Domínio: ${cfg.alvo.urlBase || '(nenhum configurado)'}`,
+    `- Domínio: ${cfg.alvo.urlBase || '(nenhum configurado)'} — você NÃO navega para fora dele.`,
     `- Login em: ${cfg.alvo.caminhoLogin || '/'}`,
     cred
       ? `- Cofre: há credencial para ${cred.dominio} (usuário "${cred.usuario}"). Use \`entrar\`. Você não vê a senha e não precisa dela.`
       : '- Cofre: NÃO há credencial para este domínio. Se cair numa tela de login, use `perguntar`.',
     '',
-    '## Como você enxerga',
-    'Você não vê a tela: você lê um instantâneo em texto da árvore de acessibilidade. Cada',
-    'elemento acionável tem um `ref=e12` — é por ele que as ferramentas agem. Os refs são',
-    'reatribuídos a cada instantâneo, então:',
-    '- depois de qualquer coisa que mude a página, o instantâneo novo já vem na resposta da ferramenta;',
-    '- se um ref falhar, chame `olhar` e use os refs novos. Nunca chute um ref.',
-    '- `f1e7` significa "elemento e7 dentro do quadro embutido 1" (iframe). Muito conteúdo de',
-    '  LMS vive em iframe — SCORM, H5P, vídeo. Trate igual.',
-    'Use `capturar` só quando o texto não bastar (gráfico, figura, fórmula em imagem).',
-    '',
-    '## Regras do modo',
-    REGRAS_POR_MODO[modo],
-    '',
     '## Produzir entregáveis',
     'Além de operar o LMS, você escreve arquivos: `escrever_arquivo`, `ler_arquivo`,',
-    '`listar_arquivos` e `baixar_anexo`. Eles alcançam APENAS a pasta `trabalhos/` — nada fora',
-    'dela, nem o código desta aplicação.',
+    '`listar_arquivos`, `apagar_arquivo`, `baixar_anexo`, `gerar_pdf` e `compactar`. Eles alcançam',
+    'APENAS a pasta `trabalhos/` — nada fora dela, nem o código desta aplicação.',
     '- Uma subpasta por atividade, com nome claro (ex.: `juncoes-tabelas/`).',
     '- Antes de escrever, leia o enunciado inteiro na página da atividade: critérios, formato',
     '  pedido, o que vale nota. Atividade tem rubrica; entregar bonito fora do pedido é zero.',
@@ -115,45 +99,158 @@ function montarPrompt(sessao: Sessao): string {
     '## Honestidade no que você produz',
     'Trabalho em grupo costuma pedir artefato que depende da equipe (código de outro integrante,',
     'print de execução, nome dos participantes, link de repositório). Você NÃO inventa nada disso.',
-    'Produza o que dá para produzir de verdade — o SQL, o código, a documentação, a estrutura —',
-    'e no `LEIA.md` liste explicitamente o que ficou faltando e por quê. Um entregável honesto com',
-    'lacunas marcadas vale mais que um completo com dado inventado: o dono precisa saber onde',
-    'olhar antes de colocar o nome dele naquilo.',
+    'Produza o que dá para produzir de verdade e, em `nota_para_dono`, liste explicitamente o que',
+    'ficou faltando e por quê. Entregável honesto com lacunas marcadas vale mais que um completo',
+    'com dado inventado: o dono precisa saber onde olhar antes de colocar o nome dele naquilo.',
+  ];
+}
+
+function descreverPolitica(p: PoliticaDominio, cfg: DiplomaConfig): string {
+  if (p.modo === 'aberto') return 'ABERTA: qualquer site https. Http em claro é recusado.';
+  const hosts = p.hosts.length ? p.hosts : cfg.web.listaGlobal;
+  return `LISTA: só estes hosts e seus subdomínios — ${hosts.join(', ') || '(nenhum!)'}.`;
+}
+
+/** A parte do prompt que só o módulo web tem. */
+function secaoWeb(cfg: DiplomaConfig, sessao: Sessao): string[] {
+  const perfil = cfg.perfil;
+  const temPerfil = Object.values(perfil).some((v) => v && v.trim());
+  return [
+    '## Onde você pode ir',
+    `Política de domínio desta missão: ${descreverPolitica(sessao.dominios, cfg)}`,
+    'Você não consegue mudar isso — se precisar de um site fora da política, use `perguntar`.',
+    'Duas regras valem em qualquer política: nada de http em claro, e a credencial do cofre só é',
+    'digitada no site a que pertence (`entrar` só funciona no host da credencial).',
+    '',
+    '## Achados: o que você encontrou, com fonte',
+    'Todo resultado relevante vira um `registrar_achado` — não fica só no seu texto final. É o',
+    'que o dono confere depois, item a item, com o link de onde veio:',
+    '- `produto`: preço como NÚMERO em `dados.preco` (só dígitos e ponto, ex. 2899.90), mais',
+    '  `vendedor`, `condicao` (novo/usado), `frete`, `site`, `link`. Registre os melhores,',
+    '  não todos: 5 a 10 ofertas boas valem mais que 40 iguais.',
+    '- `fato`: uma informação verificável, com a página onde está escrita.',
+    '- `documento`, `pessoa`, `contato`, `outro`: o que couber, sempre com `fonte`.',
+    'Sem URL de fonte não é achado, é palpite — a ferramenta recusa.',
+    'Marque `confianca` com honestidade: "baixa" para preço sem frete calculado, anúncio suspeito,',
+    'informação de fonte única não oficial.',
+    '',
+    '## Dados pessoais do dono',
+    temPerfil
+      ? 'O dono preencheu um perfil (endereço, CEP, cidade...). Quando um site pedir região para ' +
+        'calcular frete ou filtrar por proximidade, chame `dados_pessoais` — cada leitura fica ' +
+        'registrada na trilha. Use só o campo que a tarefa pede; não espalhe dado pessoal onde não ' +
+        'foi solicitado.'
+      : 'O dono NÃO preencheu perfil. Se um site exigir CEP/endereço para continuar, use `perguntar`.',
+    '',
+    '## Como pesquisar bem',
+    '- Não sabe onde procurar? Comece por um buscador — `duckduckgo.com` primeiro (tolera melhor',
+    '  navegador automatizado), `bing.com` ou `google.com` se precisar — e siga os resultados.',
+    '  "Encontre a VM mais barata para rodar um modelo de 350B" começa com uma busca, não com',
+    '  um chute de site. Anote em `anotar` os sites que valeram a pena, para o dono aprender também.',
+    braveConfigurada()
+      ? '- `buscar_web` (Brave Search) está disponível: dez links em meio segundo, sem captcha. ' +
+        'Prefira-o a abrir buscador no navegador. Resultado de busca ainda não é achado — confirme na página.'
+      : '- `buscar_web` NÃO está configurado (sem chave do Brave). Use o buscador pelo navegador.',
+    '- Preço: entre nos sites certos para o produto (marketplaces, lojas oficiais, comparadores),',
+    '  use a busca do próprio site, ordene por menor preço, e confira condição, reputação do',
+    '  vendedor e frete para a região do dono antes de registrar. Título parecido não é o mesmo',
+    '  produto: confira modelo, capacidade e versão.',
+    '- Informação: prefira fonte primária (site oficial, documento original, órgão público) à',
+    '  fonte que cita a fonte. Registre a URL exata, não a home.',
+    '- Conta do dono (ex.: portal jurídico, extrato): a credencial está no cofre, `entrar` faz o',
+    '  login. Leia, resuma, registre como `documento`/`fato`. Nenhuma ação que mude estado na',
+    '  conta sem `submeter`.',
+    '- Site bloqueou, pediu captcha, "verifique que é humano": não insista — `perguntar`. A janela',
+    '  do navegador está aberta e o dono resolve na mão. Enquanto isso, tente outro site.',
+    '- Página sem resultado útil depois de duas tentativas: registre em `anotar` e mude de',
+    '  abordagem, em vez de repetir a mesma busca.',
+    '',
+    '## O que a lei permite, e só isso',
+    'O dono assume a responsabilidade pelo uso desta ferramenta. O limite é o legal, e ele não',
+    'é negociável: você acessa o que está público ou o que é conta do próprio dono (credencial no',
+    'cofre). Você NÃO burla autenticação, paywall ou captcha de terceiros, NÃO acessa conta que',
+    'não é do dono, NÃO tenta explorar falha de site. Se um pedido só puder ser cumprido assim,',
+    'pare e diga isso — é um limite da ferramenta, não uma escolha sua.',
+  ];
+}
+
+function montarPrompt(sessao: Sessao): string {
+  const cfg = getConfig();
+  const modo = modoEfetivo();
+  const modulo = sessao.missao === 'web' ? secaoWeb(cfg, sessao) : secaoLms(cfg);
+
+  return [
+    sessao.missao === 'web'
+      ? 'Você opera a web por dentro de um navegador real, em nome do dono desta máquina, para'
+      : 'Você opera um LMS (ambiente virtual de aprendizagem) por dentro de um navegador real,',
+    sessao.missao === 'web'
+      ? 'pesquisar, comparar, ler e trazer de volta o que encontrou — organizado e com fonte.'
+      : 'em nome do dono desta máquina, na conta dele.',
+    '',
+    ...modulo,
+    '',
+    '## Como você enxerga',
+    'Você não vê a tela: você lê um instantâneo em texto da árvore de acessibilidade. Cada',
+    'elemento acionável tem um `ref=e12` — é por ele que as ferramentas agem. Os refs são',
+    'reatribuídos a cada instantâneo, então:',
+    '- depois de qualquer coisa que mude a página, o instantâneo novo já vem na resposta da ferramenta;',
+    '- se um ref falhar, chame `olhar` e use os refs novos. Nunca chute um ref.',
+    '- `f1e7` significa "elemento e7 dentro do quadro embutido 1" (iframe). Trate igual.',
+    '- papel `clicavel` é um elemento que só o CSS declara clicável (cursor de mão): funciona,',
+    '  mas a certeza é menor que num `botao` ou `link`.',
+    'Use `capturar` só quando o texto não bastar (gráfico, figura, layout que confunde).',
+    '',
+    '## Regras do modo',
+    REGRAS_POR_MODO[modo],
     '',
     '## Como trabalhar',
-    '1. Comece com `abrir` na área relevante do curso e leia de verdade antes de agir.',
-    '2. Ao responder questões: leia o enunciado inteiro, e as alternativas inteiras, antes de',
-    '   escolher. Se o instantâneo vier cortado, role. Alternativa parecida com a certa é',
-    '   exatamente como questão de múltipla escolha te derruba.',
-    '3. Se não souber uma resposta com confiança, diga isso em `anotar` e — se puder — use',
-    '   o material do próprio curso para checar. Não invente convicção que você não tem.',
-    '4. `clicar` é para navegar. `submeter` é para o que deixa marca. Não troque um pelo outro:',
-    '   usar `clicar` num botão de envio para escapar da aprovação é quebra de confiança.',
-    '5. Antes de `submeter`, escreva em `respostas` exatamente o que está sendo enviado. É esse',
-    '   texto que o dono lê para decidir. Um resumo vago faz ele aprovar às cegas.',
-    '6. Travou em captcha, 2FA ou qualquer coisa que exija um humano: `perguntar`. A janela do',
-    '   navegador está aberta e o dono pode resolver na mão.',
+    '1. Comece com `abrir` e leia de verdade antes de agir.',
+    '2. `clicar` é para navegar. `submeter` é para o que deixa marca fora desta máquina — enviar,',
+    '   comprar, publicar, mandar mensagem, finalizar. Não troque um pelo outro: usar `clicar` num',
+    '   botão de envio para escapar da aprovação é quebra de confiança.',
+    '3. Antes de `submeter`, escreva em `respostas` exatamente o que está sendo feito. É esse texto',
+    '   que o dono lê para decidir.',
+    '4. Travou em captcha, 2FA ou algo que exige um humano: `perguntar`.',
+    '5. Não invente. Se não achou, diga que não achou; se não tem certeza, marque a confiança.',
     '',
-    cfg.instrucoes.trim()
-      ? `## Instruções do dono\n${cfg.instrucoes.trim()}`
-      : '',
+    cfg.instrucoes.trim() ? `## Instruções do dono\n${cfg.instrucoes.trim()}` : '',
     '',
     '## Tarefa desta sessão',
     sessao.objetivo,
     '',
-    'Ao terminar, responda com um relato curto: o que foi feito, o que ficou pendente e o que',
-    'você não conseguiu concluir. Se algo deu errado, diga — relatório otimista não ajuda ninguém.',
+    'Ao terminar, responda com um relato curto: o que foi feito, o que encontrou (apontando para os',
+    'achados registrados), o que ficou pendente e o que não conseguiu. Relatório otimista não ajuda.',
   ]
-    .filter(Boolean)
+    .filter((l) => l !== '')
     .join('\n');
 }
 
-export async function criarSessao(objetivo: string): Promise<Sessao> {
+export async function criarSessao(
+  objetivo: string,
+  missao: TipoMissao = 'lms',
+  dominios?: Partial<PoliticaDominio>,
+): Promise<Sessao> {
+  const cfg = getConfig();
+  // LMS é sempre restrito ao alvo: é a fronteira original e não se abre por
+  // parâmetro. Web recebe a política declarada, ou a padrão da configuração.
+  const politica: PoliticaDominio =
+    missao === 'lms'
+      ? { modo: 'restrito', hosts: [] }
+      : {
+          modo:
+            dominios?.modo === 'lista' ? 'lista'
+            : dominios?.modo === 'aberto' ? 'aberto'
+            : cfg.web.politicaPadrao,
+          hosts: (dominios?.hosts ?? []).map(normalizarHost).filter(Boolean),
+        };
+
   const sessao: Sessao = {
     id: genId('ses'),
     objetivo: objetivo.trim(),
     status: 'ociosa',
     modo: modoEfetivo(),
+    missao,
+    dominios: politica,
     urlAtual: null,
     passos: [],
     pendente: null,
@@ -165,16 +262,28 @@ export async function criarSessao(objetivo: string): Promise<Sessao> {
   return createSessao(sessao);
 }
 
+/** Id da sessão que está rodando agora, ou null. O navegador é um só. */
+export function algumaRodando(): string | null {
+  const [id] = emExecucao.keys();
+  return id ?? null;
+}
+
 /**
  * Roda a sessão. Não bloqueia quem chamou: a rota dispara e devolve na hora, e o
  * progresso chega na UI por SSE. Mesma regra do Jarvis — o painel nunca trava
  * esperando o agente.
  */
-export function executar(sessaoId: string): void {
-  if (emExecucao.has(sessaoId)) return;
+export function executar(sessaoId: string): { ok: true } | { ok: false; motivo: string } {
+  if (emExecucao.has(sessaoId)) return { ok: false, motivo: 'esta sessão já está rodando' };
+  // Uma sessão por vez, e não é limitação arbitrária: o navegador é um só e a
+  // política de domínio em vigor é a da sessão ativa. Duas ao mesmo tempo
+  // disputariam a mesma página e uma herdaria a fronteira da outra.
+  const outra = algumaRodando();
+  if (outra) return { ok: false, motivo: `já há uma sessão rodando (${outra}); espere ela terminar ou pare-a` };
   const ctrl = new AbortController();
   emExecucao.set(sessaoId, ctrl);
   void rodar(sessaoId, ctrl).finally(() => emExecucao.delete(sessaoId));
+  return { ok: true };
 }
 
 async function rodar(sessaoId: string, ctrl: AbortController): Promise<void> {
@@ -184,16 +293,25 @@ async function rodar(sessaoId: string, ctrl: AbortController): Promise<void> {
   const cfg = getConfig();
   const modo = modoEfetivo();
 
-  if (!cfg.alvo.urlBase.trim()) {
+  if (sessao.missao === 'lms' && !cfg.alvo.urlBase.trim()) {
     await patchSessao(sessaoId, {
       status: 'erro',
-      resultado: 'Nenhum domínio apontado. Configure o alvo antes de rodar.',
+      resultado: 'Nenhum domínio LMS apontado. Configure o alvo antes de rodar uma missão LMS.',
     });
     return;
   }
 
+  // A fronteira desta sessão passa a valer no navegador até ela terminar.
+  nav.definirPolitica(sessao.dominios);
+
   await patchSessao(sessaoId, { status: 'rodando', modo });
-  await appendPasso(sessaoId, 'status', `Sessão iniciada no modo "${modo}".`);
+  await appendPasso(
+    sessaoId,
+    'status',
+    `Sessão ${sessao.missao} iniciada no modo "${modo}" — domínios: ${sessao.dominios.modo}` +
+      (sessao.dominios.hosts.length ? ` (${sessao.dominios.hosts.join(', ')})` : '') +
+      '.',
+  );
 
   const opcoes: Options = {
     systemPrompt: montarPrompt(sessao),
@@ -256,6 +374,9 @@ async function rodar(sessaoId: string, ctrl: AbortController): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     erro = ctrl.signal.aborted ? 'interrompida pelo dono' : msg;
   }
+
+  // Fronteira volta ao restrito: a próxima sessão define a sua ao começar.
+  nav.definirPolitica({ modo: 'restrito', hosts: [] });
 
   const abortada = ctrl.signal.aborted;
   await patchSessao(sessaoId, {

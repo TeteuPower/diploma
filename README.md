@@ -67,6 +67,34 @@ Cada elemento acionável ganha um `ref`, e é por ele que o agente age. Custa um
 uma imagem, não depende de coordenada e funciona dentro de iframe — que é onde a maior parte do
 conteúdo de LMS mora (SCORM, H5P, vídeo). Screenshot fica para o que sobra: questão em gráfico.
 
+## Missões web
+
+O LMS virou um módulo. A outra missão é **web**: pesquisar preços, ler uma conta sua, encontrar
+informação — em qualquer site https, salvo política que você escolher na hora de criar a sessão:
+
+- **Aberta** (padrão): qualquer site https. Ele descobre onde procurar sozinho — começando por um
+  buscador quando não sabe.
+- **Lista**: só os hosts que você informar (ou a lista global da Configuração).
+
+Em qualquer política: nada de http em claro, e a **credencial do cofre só é digitada no site dela**.
+Uma sessão roda por vez — o navegador é um só.
+
+O que ele encontra vira **achado**, com a URL de onde saiu, na aba **Achados**: produto vira tabela
+ordenada por preço; fato, documento e contato viram cartão com a fonte ao lado. Sem fonte, a
+ferramenta recusa.
+
+Na Configuração você preenche o **Perfil** (CEP, cidade, endereço) para ele filtrar por região —
+cada leitura fica registrada na trilha — e a chave do **Brave Search**, que vai para o cofre e
+nunca chega à LLM: ele só recebe os resultados.
+
+Exemplos que funcionam como pedido:
+
+> Pesquise os melhores preços do tablet Samsung Galaxy Tab S8, novo, com frete para o meu CEP.
+
+> Encontre a VM mais barata para hospedar um modelo de 350B parâmetros. Não sei por onde começar.
+
+> Acesse meu processo no Jusbrasil (credencial no cofre) e me dê um resumo de como está.
+
 ## A aba Entrega
 
 Quando ele termina de produzir os trabalhos, a aba **Entrega** mostra o que a aplicação conferiu

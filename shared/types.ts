@@ -42,6 +42,59 @@ export interface AlvoLms {
   caminhoLogin: string;
 }
 
+/**
+ * Onde o agente pode navegar. Antes era um só alvo (o LMS); pesquisar na web
+ * exige abrir a porta — mas de forma declarada, não por acidente.
+ *
+ * - `restrito`: só o alvo LMS e seus subdomínios (comportamento original).
+ * - `lista`:    só os hosts listados (da missão, ou a lista global da config).
+ * - `aberto`:   qualquer site https.
+ *
+ * O que NÃO muda em nenhum modo: credencial do cofre só é digitada no host a
+ * que pertence, e nada de http em claro fora de localhost.
+ */
+export type ModoDominio = 'restrito' | 'lista' | 'aberto';
+
+export interface PoliticaDominio {
+  modo: ModoDominio;
+  /** Hosts permitidos em `lista`. Vazio ⇒ usa `web.listaGlobal` da config. */
+  hosts: string[];
+}
+
+/** O tipo de trabalho da sessão: muda o prompt, as ferramentas em foco e a política padrão. */
+export type TipoMissao = 'lms' | 'web';
+
+export const MISSOES: TipoMissao[] = ['lms', 'web'];
+
+export interface ConfigWeb {
+  /** Política que uma missão web recebe quando não declara a sua. */
+  politicaPadrao: Exclude<ModoDominio, 'restrito'>;
+  /** A allowlist global, usada por `lista` quando a missão não traz hosts. */
+  listaGlobal: string[];
+}
+
+/**
+ * Dados do dono que o agente pode precisar digitar num site (filtrar por
+ * região, preencher um formulário). Não é segredo como a senha — o agente
+ * precisa VER para digitar — mas é dado pessoal: cada leitura vai para a
+ * trilha e para o log.
+ */
+export interface Perfil {
+  nome: string;
+  cep: string;
+  endereco: string;
+  cidade: string;
+  uf: string;
+  telefone: string;
+  email: string;
+}
+
+/** Só o que não é segredo. A chave da API mora no cofre, como qualquer senha. */
+export interface ConfigBrave {
+  /** Código de país da Brave (ex.: BR). Vazio ⇒ resultados globais. */
+  pais: string;
+}
+
 export interface ConfigNavegador {
   /** Headless é mais rápido; com janela você acompanha e resolve captcha na mão. */
   headless: boolean;
@@ -76,6 +129,9 @@ export interface DiplomaConfig {
    * desligada de propósito — entregar é decisão do dono, e é irreversível.
    */
   permitirEntrega: boolean;
+  web: ConfigWeb;
+  perfil: Perfil;
+  brave: ConfigBrave;
   /** Instruções livres que entram no system prompt (regras da disciplina etc). */
   instrucoes: string;
   navOrientation: NavOrientation;
@@ -152,6 +208,9 @@ export interface Sessao {
   objetivo: string;
   status: StatusSessao;
   modo: ModoAutonomia;
+  missao: TipoMissao;
+  /** A fronteira desta sessão. Fixada na criação; o agente não a altera. */
+  dominios: PoliticaDominio;
   urlAtual: string | null;
   passos: Passo[];
   /** Não-nulo ⇒ status 'aguardando' e a ferramenta está bloqueada esperando. */
@@ -164,12 +223,39 @@ export interface Sessao {
 }
 
 // -----------------------------------------------------------------------------
+// Achados — o que o agente encontrou, estruturado, com fonte.
+//
+// A prosa do relato final diz o que ele concluiu; os achados são o material que
+// sustenta a conclusão, um a um, cada qual com a URL de onde veio. É o que
+// permite ao dono conferir em vez de acreditar.
+// -----------------------------------------------------------------------------
+
+export type TipoAchado = 'produto' | 'fato' | 'documento' | 'pessoa' | 'contato' | 'outro';
+
+export const TIPOS_ACHADO: TipoAchado[] = ['produto', 'fato', 'documento', 'pessoa', 'contato', 'outro'];
+
+export interface Achado {
+  id: string;
+  sessaoId: string;
+  tipo: TipoAchado;
+  titulo: string;
+  resumo: string;
+  /** Campos livres, tipados pelo agente (preco, vendedor, condicao, data...). */
+  dados: Record<string, string | number | boolean | null>;
+  /** URL onde foi visto. Sem fonte não é achado, é palpite. */
+  fonte: string;
+  confianca: 'alta' | 'media' | 'baixa';
+  capturadoEm: string;
+}
+
+// -----------------------------------------------------------------------------
 // Streams
 // -----------------------------------------------------------------------------
 
 export type SessaoStreamEvent =
   | { type: 'snapshot'; sessoes: Sessao[] }
   | { type: 'sessao'; sessao: Sessao }
+  | { type: 'achado'; achado: Achado }
   | { type: 'removida'; id: string }
   | { type: 'ping' };
 

@@ -66,12 +66,20 @@ export const sessaoEvents = new EventEmitter();
 export async function initStore(): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true });
   await Promise.all([configFile.load(), sessoesFile.load()]);
+  // Sessões gravadas antes de existir "missão" eram todas LMS, no alvo restrito.
+  const migradas = sessoesFile.get().map((s) =>
+    s.missao ? s : { ...s, missao: 'lms' as const, dominios: { modo: 'restrito' as const, hosts: [] } },
+  );
+  sessoesFile.setSync(migradas);
   // Migração leve: campos novos da config ganham o default sem perder o salvo.
   const merged: DiplomaConfig = {
     ...DEFAULT_CONFIG,
     ...configFile.get(),
     alvo: { ...DEFAULT_CONFIG.alvo, ...configFile.get().alvo },
     navegador: { ...DEFAULT_CONFIG.navegador, ...configFile.get().navegador },
+    web: { ...DEFAULT_CONFIG.web, ...configFile.get().web },
+    perfil: { ...DEFAULT_CONFIG.perfil, ...configFile.get().perfil },
+    brave: { ...DEFAULT_CONFIG.brave, ...configFile.get().brave },
   };
   configFile.setSync(merged);
   await configFile.flush();
@@ -92,6 +100,9 @@ export async function patchConfig(patch: Partial<DiplomaConfig>): Promise<Diplom
     ...patch,
     alvo: patch.alvo ? { ...atual.alvo, ...patch.alvo } : atual.alvo,
     navegador: patch.navegador ? { ...atual.navegador, ...patch.navegador } : atual.navegador,
+    web: patch.web ? { ...atual.web, ...patch.web } : atual.web,
+    perfil: patch.perfil ? { ...atual.perfil, ...patch.perfil } : atual.perfil,
+    brave: patch.brave ? { ...atual.brave, ...patch.brave } : atual.brave,
   };
   configFile.setSync(next);
   await configFile.flush();

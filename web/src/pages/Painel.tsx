@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Sessao, DiplomaConfig } from '@shared/types';
-import { Panel, TextArea, EmptyState, Badge } from '../components/ui';
+import type { Sessao, DiplomaConfig, TipoMissao, ModoDominio } from '@shared/types';
+import { Panel, TextArea, TextInput, Select, EmptyState, Badge } from '../components/ui';
 import {
   ICONE_PASSO, COR_PASSO, COR_STATUS, ROTULO_STATUS,
   ROTULO_ACAO, CORES_MODO, ROTULO_MODO, hora, dataHora,
@@ -166,6 +166,10 @@ function CartaoSessao({ sessao, onMudou }: { sessao: Sessao; onMudou: () => void
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-white/35">
             <span style={{ color: cor }}>{ROTULO_STATUS[sessao.status]}</span>
             <span>·</span>
+            <span title={`domínios: ${sessao.dominios?.modo ?? 'restrito'}`}>
+              {sessao.missao === 'web' ? '🌐 web' : '🎓 lms'}
+            </span>
+            <span>·</span>
             <span style={{ color: CORES_MODO[sessao.modo] }}>{ROTULO_MODO[sessao.modo]}</span>
             <span>·</span>
             <span>{sessao.passos.length} passos</span>
@@ -259,14 +263,22 @@ export function Painel({
 }) {
   const [objetivo, setObjetivo] = useState('');
   const [criando, setCriando] = useState(false);
+  const [missao, setMissao] = useState<TipoMissao>('web');
+  const [politica, setPolitica] = useState<'padrao' | 'aberto' | 'lista'>('padrao');
+  const [hosts, setHosts] = useState('');
 
-  const semDominio = !config?.alvo.urlBase?.trim();
+  // Só a missão LMS precisa do alvo apontado; a web tem a própria política.
+  const semDominio = missao === 'lms' && !config?.alvo.urlBase?.trim();
 
   const iniciar = async () => {
-    if (!objetivo.trim() || criando) return;
+    if (!objetivo.trim() || criando || semDominio) return;
     setCriando(true);
     try {
-      await criarSessao(objetivo.trim());
+      const dominios =
+        missao === 'web' && politica !== 'padrao'
+          ? { modo: politica as ModoDominio, hosts: hosts.split(/[\s,]+/).filter(Boolean) }
+          : undefined;
+      await criarSessao(objetivo.trim(), missao, dominios);
       setObjetivo('');
       onMudou();
     } catch (err) {
@@ -279,25 +291,82 @@ export function Painel({
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-5">
       <Panel title="Nova sessão" icon="▶️" accent="#38e0d8">
+        {/* A missão muda o prompt, as ferramentas em foco e a fronteira de domínio. */}
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {(
+            [
+              ['web', '🌐', 'Web', 'Pesquisar, comparar, ler contas suas. Qualquer site https, salvo política.'],
+              ['lms', '🎓', 'LMS', `Operar o ambiente de ensino apontado${config?.alvo.nome ? ` (${config.alvo.nome})` : ''}.`],
+            ] as const
+          ).map(([id, icone, rotulo, desc]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setMissao(id)}
+              className={`rounded-xl border p-3 text-left transition ${
+                missao === id ? 'border-accent/60 bg-accent/10' : 'border-white/10 bg-black/20 hover:bg-black/30'
+              }`}
+            >
+              <div className="text-sm font-semibold text-white/90">
+                {icone} {rotulo}
+              </div>
+              <div className="mt-0.5 text-[11px] leading-relaxed text-white/45">{desc}</div>
+            </button>
+          ))}
+        </div>
+
         {semDominio ? (
           <EmptyState icon="🧭">
-            Nenhum domínio apontado ainda. Vá em <strong>Configuração</strong> e diga a que LMS
-            este copiloto responde.
+            Nenhum domínio LMS apontado. Vá em <strong>Configuração</strong> e diga a que ambiente
+            esta missão responde — ou escolha a missão Web.
           </EmptyState>
         ) : (
           <>
+            {missao === 'web' && (
+              <div className="mb-3 grid gap-2 md:grid-cols-[240px_1fr]">
+                <Select value={politica} onChange={(e) => setPolitica(e.target.value as typeof politica)}>
+                  <option value="padrao">
+                    Política padrão ({config?.web.politicaPadrao === 'lista' ? 'lista global' : 'aberta'})
+                  </option>
+                  <option value="aberto">Aberta — qualquer site https</option>
+                  <option value="lista">Lista — só os hosts que eu informar</option>
+                </Select>
+                {politica === 'lista' ? (
+                  <TextInput
+                    value={hosts}
+                    onChange={(e) => setHosts(e.target.value)}
+                    placeholder="mercadolivre.com.br, olx.com.br (vazio = lista global da Configuração)"
+                  />
+                ) : (
+                  <p className="self-center text-[11px] text-white/35">
+                    Em qualquer política: só https, e credencial do cofre só no site dela.
+                  </p>
+                )}
+              </div>
+            )}
+
             <TextArea
               rows={3}
               value={objetivo}
               onChange={(e) => setObjetivo(e.target.value)}
-              placeholder={'Ex.: Entrar no curso "Segurança da Informação", abrir o módulo 3 e responder o questionário de fixação.'}
+              placeholder={
+                missao === 'web'
+                  ? 'Ex.: Pesquise os melhores preços do tablet Samsung Galaxy Tab S8, novo, com frete para o meu CEP.'
+                  : 'Ex.: Entrar em Aulas, abrir a Fase 6 e mapear o que está pendente.'
+              }
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void iniciar();
               }}
             />
             <div className="mt-3 flex items-center justify-between gap-3">
               <p className="text-xs text-white/35">
-                Alvo: <span className="font-mono text-white/50">{config?.alvo.urlBase}</span>
+                {missao === 'lms' ? (
+                  <>
+                    Alvo: <span className="font-mono text-white/50">{config?.alvo.urlBase}</span>
+                  </>
+                ) : (
+                  <>Missão web · uma sessão por vez (o navegador é um)</>
+                )}
                 {' · '}Ctrl+Enter para iniciar
               </p>
               <button

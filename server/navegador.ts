@@ -1,11 +1,13 @@
 import { chromium } from 'playwright';
 import type { Browser, BrowserContext, Page, Frame, Locator } from 'playwright';
+import type { PoliticaDominio } from '../shared/types';
 import { PERFIL_DIR } from './env';
 import { getConfig } from './store';
 import { fonteInstantaneo, ATRIBUTO_REF, type ResultadoInstantaneo } from './instantaneo';
 import { revelarParaNavegador } from './cofre';
 import { log, erro as logErro, cronometro } from './log';
 import { observar } from './tentativas';
+import { normalizarHost } from './hosts';
 
 /**
  * A camada de navegador. Playwright + Chromium.
@@ -54,16 +56,77 @@ function hostAlvo(): string {
   }
 }
 
-/** A parede. Só passa o próprio host do alvo e seus subdomínios. */
-export function dentroDoAlvo(url: string): boolean {
-  const alvo = hostAlvo();
-  if (!alvo) return false;
+// ---------------------------------------------------------------------------
+// Política de domínio
+// ---------------------------------------------------------------------------
+
+/**
+ * A política em vigor. É definida quando a sessão começa e volta ao restrito
+ * quando ela termina — o navegador é um só, então a sessão que roda é a que
+ * manda. Começa restrita para que nada navegue antes de alguém dizer para onde.
+ */
+let politicaAtiva: PoliticaDominio = { modo: 'restrito', hosts: [] };
+
+export function definirPolitica(p: PoliticaDominio): void {
+  // Normaliza aqui também, não só na criação da sessão: quem chama pode passar
+  // a lista como o dono colou (URL inteira, www, barra), e a comparação é por host.
+  politicaAtiva = { modo: p.modo, hosts: p.hosts.map(normalizarHost).filter(Boolean) };
+  log('navegador', 'política de domínio definida', { modo: p.modo, hosts: p.hosts.length });
+}
+
+export function politicaAtual(): PoliticaDominio {
+  return politicaAtiva;
+}
+
+const casaHost = (host: string, permitido: string): boolean =>
+  host === permitido || host.endsWith(`.${permitido}`);
+
+/**
+ * A parede, agora com três formatos. O que NÃO muda em nenhum deles:
+ *
+ * - **https só.** Http em claro só para localhost (é como os testes sobem o LMS
+ *   falso). Uma pesquisa de preço não pode passar por site sem TLS: tudo que o
+ *   agente digitar lá — inclusive o CEP do dono — viajaria legível.
+ * - **credencial presa ao host.** Isso não vive aqui, vive em `cofre.paraUrl`,
+ *   que só devolve a credencial cujo domínio casa com a URL atual. Abrir a
+ *   política não abre o cofre.
+ */
+export function permitido(url: string): { ok: true } | { ok: false; motivo: string } {
+  let u: URL;
   try {
-    const host = new URL(url).host.toLowerCase();
-    return host === alvo || host.endsWith(`.${alvo}`);
+    u = new URL(url);
   } catch {
-    return false;
+    return { ok: false, motivo: `URL inválida: ${url}` };
   }
+  const host = u.host.toLowerCase();
+  const local = host === 'localhost' || host.startsWith('localhost:') || host.startsWith('127.0.0.1');
+
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) {
+    return { ok: false, motivo: `só https (recebi ${u.protocol}//${host})` };
+  }
+
+  const p = politicaAtiva;
+  if (p.modo === 'aberto') return { ok: true };
+
+  if (p.modo === 'restrito') {
+    const alvo = hostAlvo();
+    if (!alvo) return { ok: false, motivo: 'nenhum domínio LMS apontado na configuração' };
+    return casaHost(host, alvo)
+      ? { ok: true }
+      : { ok: false, motivo: `fora do alvo LMS (${alvo}): ${host}` };
+  }
+
+  // lista: a da missão, ou a global da config quando a missão não trouxe a sua.
+  const hosts = p.hosts.length ? p.hosts : getConfig().web.listaGlobal;
+  if (!hosts.length) return { ok: false, motivo: 'política "lista" sem nenhum host permitido' };
+  return hosts.some((h) => casaHost(host, h))
+    ? { ok: true }
+    : { ok: false, motivo: `fora da lista permitida: ${host}` };
+}
+
+/** Compatibilidade: a pergunta antiga, respondida pela política atual. */
+export function dentroDoAlvo(url: string): boolean {
+  return permitido(url).ok;
 }
 
 export async function abrir(): Promise<Page> {
@@ -220,19 +283,28 @@ function resolverRef(ref: string): { frame: Frame; seletor: string } {
 // Ações
 // ---------------------------------------------------------------------------
 
+/**
+ * Caminho relativo só faz sentido com um alvo LMS para ancorar. Numa missão web
+ * sem alvo, "olx.com.br/tablet" vira "https://olx.com.br/tablet" — nunca http,
+ * que a política recusaria em seguida de qualquer forma.
+ */
+function absolutizar(url: string): string {
+  const limpa = url.trim();
+  if (limpa.includes('://')) return limpa;
+  const base = getConfig().alvo.urlBase.trim();
+  if (base && limpa.startsWith('/')) {
+    return new URL(limpa, base.includes('://') ? base : `https://${base}`).toString();
+  }
+  return `https://${limpa.replace(/^\/+/, '')}`;
+}
+
 export async function navegar(url: string): Promise<void> {
   const page = await abrir();
-  const cfg = getConfig();
-  const base = cfg.alvo.urlBase.trim();
-  const absoluta = url.includes('://')
-    ? url
-    : new URL(url, base.includes('://') ? base : `https://${base}`).toString();
+  const absoluta = absolutizar(url);
 
-  if (!dentroDoAlvo(absoluta)) {
-    throw new Error(
-      `fora do domínio apontado (${hostAlvo() || 'nenhum'}): ${absoluta}. ` +
-        'Navegação recusada.',
-    );
+  const veredito = permitido(absoluta);
+  if (!veredito.ok) {
+    throw new Error(`${veredito.motivo}. Navegação recusada.`);
   }
   const medir = cronometro();
   await page.goto(absoluta, { waitUntil: 'domcontentloaded' });
@@ -379,13 +451,11 @@ export async function esperarTexto(texto: string, segundos: number): Promise<boo
  */
 export async function baixar(url: string): Promise<{ dados: Buffer; tipo: string; nome: string }> {
   const page = await abrir();
-  const base = getConfig().alvo.urlBase.trim();
-  const absoluta = url.includes('://')
-    ? url
-    : new URL(url, base.includes('://') ? base : `https://${base}`).toString();
+  const absoluta = absolutizar(url);
 
-  if (!dentroDoAlvo(absoluta)) {
-    throw new Error(`fora do domínio apontado: ${absoluta}. Download recusado.`);
+  const veredito = permitido(absoluta);
+  if (!veredito.ok) {
+    throw new Error(`${veredito.motivo}. Download recusado.`);
   }
 
   const medir = cronometro();

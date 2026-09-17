@@ -1,6 +1,6 @@
 import type { Response } from 'express';
 import { sessaoEvents, listSessoes } from './store';
-import type { Sessao, SessaoStreamEvent } from '../shared/types';
+import type { Sessao, Achado, SessaoStreamEvent } from '../shared/types';
 
 const clientes = new Set<Response>();
 
@@ -46,3 +46,5 @@ function difundir(evento: SessaoStreamEvent): void {
 
 sessaoEvents.on('sessao', (s: Sessao) => difundir({ type: 'sessao', sessao: s }));
 sessaoEvents.on('removida', (id: string) => difundir({ type: 'removida', id }));
+// Achado novo chega ao vivo na página Achados, pelo mesmo cano das sessões.
+sessaoEvents.on('achado', (a: Achado) => difundir({ type: 'achado', achado: a }));

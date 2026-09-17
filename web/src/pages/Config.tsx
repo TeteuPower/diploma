@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import type { DiplomaConfig, ModoAutonomia, AcaoSensivel } from '@shared/types';
+import type { DiplomaConfig, ModoAutonomia, AcaoSensivel, Perfil } from '@shared/types';
 import { ACOES_SENSIVEIS } from '@shared/types';
 import { Panel, Field, TextInput, TextArea, Select, Toggle, OptionCard } from '../components/ui';
 import {
   ROTULO_MODO, DESCRICAO_MODO, CORES_MODO, ICONE_MODO, ROTULO_ACAO, HINT_ACAO,
 } from '../lib/modo';
-import { patchConfig, fecharNavegador } from '../api';
+import {
+  patchConfig, fecharNavegador, getBrave, salvarChaveBrave, removerChaveBrave, testarBrave,
+} from '../api';
 
 const MODOS: ModoAutonomia[] = ['observar', 'assistido', 'guiado', 'autonomo'];
 
@@ -22,6 +24,17 @@ export function Config({
   const [urlBase, setUrlBase] = useState('');
   const [caminhoLogin, setCaminhoLogin] = useState('');
   const [instrucoes, setInstrucoes] = useState('');
+  const [perfil, setPerfil] = useState<Perfil>({
+    nome: '', cep: '', endereco: '', cidade: '', uf: '', telefone: '', email: '',
+  });
+  const [listaGlobal, setListaGlobal] = useState('');
+  const [brave, setBrave] = useState<{ configurada: boolean; pais: string } | null>(null);
+  const [braveChave, setBraveChave] = useState('');
+  const [braveTeste, setBraveTeste] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getBrave().then(setBrave).catch(() => {});
+  }, [config]);
   const [sujo, setSujo] = useState(false);
   const [salvando, setSalvando] = useState(false);
 
@@ -31,6 +44,8 @@ export function Config({
     setUrlBase(config.alvo.urlBase);
     setCaminhoLogin(config.alvo.caminhoLogin);
     setInstrucoes(config.instrucoes);
+    setPerfil(config.perfil);
+    setListaGlobal(config.web.listaGlobal.join('\n'));
   }, [config, sujo]);
 
   if (!config) return null;
@@ -51,6 +66,8 @@ export function Config({
     await salvar({
       alvo: { nome, urlBase, caminhoLogin },
       instrucoes,
+      perfil,
+      web: { ...config.web, listaGlobal: listaGlobal.split(/[\s,]+/).filter(Boolean) },
     });
     setSujo(false);
   };
@@ -60,6 +77,18 @@ export function Config({
     const proximo = atual.includes(acao) ? atual.filter((a) => a !== acao) : [...atual, acao];
     void salvar({ exigemAprovacao: proximo });
   };
+
+  // O mesmo botão "Salvar" dos painéis de texto, para os painéis novos.
+  const botaoSalvar = sujo && (
+    <button
+      type="button"
+      className="btn-primary px-3 py-1 text-xs"
+      disabled={salvando}
+      onClick={() => void salvarTextos()}
+    >
+      {salvando ? 'Salvando…' : 'Salvar'}
+    </button>
+  );
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
@@ -242,6 +271,150 @@ export function Config({
         <button type="button" className="btn-ghost" onClick={() => void fecharNavegador()}>
           Fechar o navegador agora
         </button>
+      </Panel>
+
+      <Panel title="Onde ele pode navegar (missões web)" icon="🌐" accent="#8b7bff" right={botaoSalvar}>
+        <p className="mb-4 text-xs leading-relaxed text-white/45">
+          Missão LMS continua presa ao alvo lá em cima. Missão web usa a política escolhida na hora
+          de criar a sessão — e, se você não escolher, esta aqui. Em qualquer política: nada de http
+          em claro, e credencial do cofre só é digitada no site a que pertence.
+        </p>
+        <Field label="Política padrão">
+          <Select
+            value={config.web.politicaPadrao}
+            onChange={(e) =>
+              void salvar({ web: { ...config.web, politicaPadrao: e.target.value as 'aberto' | 'lista' } })
+            }
+          >
+            <option value="aberto">Aberta — qualquer site https</option>
+            <option value="lista">Lista — só os hosts abaixo</option>
+          </Select>
+        </Field>
+        <Field
+          label="Lista global de hosts"
+          hint="Um por linha. Usada pela política 'lista' quando a missão não traz a sua."
+        >
+          <TextArea
+            rows={4}
+            value={listaGlobal}
+            onChange={(e) => {
+              setListaGlobal(e.target.value);
+              setSujo(true);
+            }}
+            placeholder={'mercadolivre.com.br\nolx.com.br'}
+          />
+        </Field>
+      </Panel>
+
+      <Panel title="Brave Search" icon="🦁" accent="#fb542b">
+        <p className="mb-4 text-xs leading-relaxed text-white/45">
+          Busca por API, sem abrir buscador no navegador — mais rápido e sem captcha. A chave vai
+          para o <strong className="text-white/70">cofre</strong>, cifrada pelo Windows, e nunca
+          entra no contexto da LLM: o agente só recebe título, link e descrição dos resultados.
+        </p>
+        <div className="grid grid-cols-[1fr_120px] gap-3">
+          <Field
+            label={brave?.configurada ? 'Chave da API (configurada — cole para substituir)' : 'Chave da API'}
+            hint="Console da Brave Search API → Subscription token."
+          >
+            <TextInput
+              type="password"
+              autoComplete="off"
+              value={braveChave}
+              onChange={(e) => setBraveChave(e.target.value)}
+              placeholder={brave?.configurada ? '••••••••••••' : 'BSA…'}
+            />
+          </Field>
+          <Field label="País" hint="Opcional. Ex.: BR">
+            <TextInput
+              value={config.brave.pais}
+              maxLength={2}
+              onChange={(e) => void salvar({ brave: { pais: e.target.value.toUpperCase() } })}
+            />
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={!braveChave.trim()}
+            onClick={async () => {
+              try {
+                await salvarChaveBrave(braveChave.trim());
+                setBraveChave('');
+                setBraveTeste(null);
+                setBrave(await getBrave());
+              } catch (e) {
+                alert(e instanceof Error ? e.message : String(e));
+              }
+            }}
+          >
+            Salvar chave
+          </button>
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={!brave?.configurada}
+            onClick={async () => {
+              setBraveTeste('testando…');
+              const r = await testarBrave();
+              setBraveTeste(
+                r.ok
+                  ? `✓ ${r.detalhe}${r.amostra[0] ? ` — ex.: ${r.amostra[0].titulo}` : ''}`
+                  : `✗ ${r.detalhe}`,
+              );
+            }}
+          >
+            Testar
+          </button>
+          {brave?.configurada && (
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={async () => {
+                if (!confirm('Remover a chave do Brave do cofre?')) return;
+                await removerChaveBrave();
+                setBrave(await getBrave());
+                setBraveTeste(null);
+              }}
+            >
+              Remover chave
+            </button>
+          )}
+          {braveTeste && <span className="text-xs text-white/60">{braveTeste}</span>}
+        </div>
+      </Panel>
+
+      <Panel title="Seu perfil" icon="🪪" accent="#f5b955" right={botaoSalvar}>
+        <p className="mb-4 text-xs leading-relaxed text-white/45">
+          O que o agente pode digitar num site quando a tarefa pede região ou identificação — frete
+          para o seu CEP, filtro por cidade. Não é segredo como a senha (ele precisa ver para digitar),
+          mas é dado pessoal: <strong className="text-white/70">cada leitura fica registrada</strong>{' '}
+          na trilha da sessão e no log.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          {(
+            [
+              ['nome', 'Nome', 'Como aparece em cadastros'],
+              ['cep', 'CEP', 'Para frete e filtro por região'],
+              ['endereco', 'Endereço', 'Rua e número'],
+              ['cidade', 'Cidade', ''],
+              ['uf', 'UF', 'Duas letras'],
+              ['telefone', 'Telefone', 'Só se algum site exigir'],
+              ['email', 'E-mail', 'Só se algum site exigir'],
+            ] as [keyof Perfil, string, string][]
+          ).map(([k, rotulo, hint]) => (
+            <Field key={k} label={rotulo} hint={hint || undefined}>
+              <TextInput
+                value={perfil[k]}
+                onChange={(e) => {
+                  setPerfil({ ...perfil, [k]: e.target.value });
+                  setSujo(true);
+                }}
+              />
+            </Field>
+          ))}
+        </div>
       </Panel>
 
       <Panel

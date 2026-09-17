@@ -128,6 +128,32 @@ try {
   await nav.navegar('https://example.com').catch(() => { recusou = true; });
   checa('navegar() recusa fora do alvo', recusou);
 
+  // --- Política de domínio: três modos, duas regras que não mudam ---
+  console.log('\nPolítica de domínio:');
+  nav.definirPolitica({ modo: 'restrito', hosts: [] });
+  checa('restrito: aceita o alvo', nav.permitido('http://localhost:9099/x').ok);
+  checa('restrito: recusa outro host', !nav.permitido('https://olx.com.br/').ok);
+
+  // A lista vem como o dono cola: URL inteira, com www e barra. Tem que casar.
+  nav.definirPolitica({ modo: 'lista', hosts: ['olx.com.br', 'https://www.mercadolivre.com.br/'] });
+  checa('lista: aceita host listado', nav.permitido('https://olx.com.br/tablet').ok);
+  checa('lista: aceita subdomínio do listado', nav.permitido('https://sp.olx.com.br/tablet').ok);
+  checa('lista: normaliza URL colada na lista', nav.permitido('https://www.mercadolivre.com.br/x').ok);
+  checa('lista: aceita produto.mercadolivre', nav.permitido('https://produto.mercadolivre.com.br/y').ok);
+  checa('lista: recusa host fora', !nav.permitido('https://amazon.com.br/').ok);
+  checa('lista: recusa http em claro mesmo listado', !nav.permitido('http://olx.com.br/').ok);
+  checa('lista: recusa sósia (olx.com.br.evil.com)', !nav.permitido('https://olx.com.br.evil.com/').ok);
+
+  nav.definirPolitica({ modo: 'aberto', hosts: [] });
+  checa('aberto: aceita qualquer https', nav.permitido('https://qualquer-site.example/').ok);
+  checa('aberto: ainda recusa http em claro', !nav.permitido('http://qualquer-site.example/').ok);
+  checa('aberto: aceita http só em localhost', nav.permitido('http://localhost:9099/').ok);
+  checa('aberto: recusa file://', !nav.permitido('file:///C:/Windows/win.ini').ok);
+  checa('aberto: recusa URL inválida', !nav.permitido('isso nao e url').ok);
+
+  // Volta ao restrito: o resto do teste conta com a fronteira original.
+  nav.definirPolitica({ modo: 'restrito', hosts: [] });
+
   // --- Instantâneo do quiz ---
   console.log('\nInstantâneo do quiz:');
   await nav.navegar('/curso');

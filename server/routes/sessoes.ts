@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { listSessoes, getSessao, deleteSessao } from '../store';
-import { criarSessao, executar, abortar, estaRodando } from '../agente';
+import { criarSessao, executar, abortar, estaRodando, algumaRodando } from '../agente';
+import { removerDaSessao } from '../achados';
+import { MISSOES } from '../../shared/types';
+import type { TipoMissao, PoliticaDominio } from '../../shared/types';
 import { responder } from '../aprovacao';
 import { adicionarCliente } from '../sse';
 import * as nav from '../navegador';
@@ -18,14 +21,38 @@ sessoesRouter.get('/:id', (req, res) => {
   res.json(s);
 });
 
-/** Cria e já dispara. A resposta volta na hora; o progresso chega por SSE. */
+/**
+ * Cria e já dispara. A resposta volta na hora; o progresso chega por SSE.
+ *
+ * `missao` escolhe o módulo (lms | web) e `dominios` a fronteira da sessão.
+ * Uma só roda por vez — o navegador é um, e a política em vigor é a da
+ * sessão ativa; a segunda recebe 409 em vez de herdar a fronteira da primeira.
+ */
 sessoesRouter.post('/', async (req, res) => {
-  const { objetivo } = (req.body ?? {}) as Record<string, unknown>;
+  const { objetivo, missao, dominios } = (req.body ?? {}) as Record<string, unknown>;
   if (typeof objetivo !== 'string' || !objetivo.trim()) {
     return res.status(400).json({ error: 'objetivo é obrigatório' });
   }
-  const sessao = await criarSessao(objetivo.slice(0, 4000));
-  executar(sessao.id);
+
+  const tipo: TipoMissao = MISSOES.includes(missao as TipoMissao) ? (missao as TipoMissao) : 'lms';
+
+  let politica: Partial<PoliticaDominio> | undefined;
+  if (dominios && typeof dominios === 'object') {
+    const d = dominios as Record<string, unknown>;
+    politica = {
+      modo: d.modo === 'lista' || d.modo === 'aberto' ? d.modo : undefined,
+      hosts: Array.isArray(d.hosts) ? d.hosts.filter((h): h is string => typeof h === 'string').slice(0, 100) : [],
+    };
+  }
+
+  const rodando = algumaRodando();
+  if (rodando) {
+    return res.status(409).json({ error: `já há uma sessão rodando (${rodando}); espere ou pare-a` });
+  }
+
+  const sessao = await criarSessao(objetivo.slice(0, 4000), tipo, politica);
+  const r = executar(sessao.id);
+  if (!r.ok) return res.status(409).json({ error: r.motivo, sessao });
   res.status(201).json(sessao);
 });
 
@@ -34,7 +61,8 @@ sessoesRouter.post('/:id/retomar', (req, res) => {
   const s = getSessao(req.params.id);
   if (!s) return res.status(404).json({ error: 'sessão não encontrada' });
   if (estaRodando(s.id)) return res.status(409).json({ error: 'a sessão já está rodando' });
-  executar(s.id);
+  const r = executar(s.id);
+  if (!r.ok) return res.status(409).json({ error: r.motivo });
   res.json({ ok: true });
 });
 
@@ -63,6 +91,8 @@ sessoesRouter.post('/:id/aprovacao', async (req, res) => {
 sessoesRouter.delete('/:id', async (req, res) => {
   abortar(req.params.id);
   const ok = await deleteSessao(req.params.id);
+  // Os achados são da sessão: vão junto.
+  await removerDaSessao(req.params.id);
   if (!ok) return res.status(404).json({ error: 'sessão não encontrada' });
   res.status(204).end();
 });

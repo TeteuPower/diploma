@@ -16,6 +16,7 @@ export const PATHS = {
   sessoes: join(DATA_DIR, 'sessoes.json'),
   cofre: join(DATA_DIR, 'cofre.json'),
   tentativas: join(DATA_DIR, 'tentativas.json'),
+  achados: join(DATA_DIR, 'achados.json'),
 } as const;
 
 export const WEB_DIST = join(PROJECT_ROOT, 'web', 'dist');

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { DiplomaConfig, EstadoCofre, HealthInfo, Sessao } from '@shared/types';
+import type { DiplomaConfig, EstadoCofre, HealthInfo, Sessao, Achado } from '@shared/types';
 import { Layout, PAGES, type Page } from './components/Layout';
 import { Painel } from './pages/Painel';
 import { Entrega } from './pages/Entrega';
+import { Achados } from './pages/Achados';
 import { Cofre } from './pages/Cofre';
 import { Config } from './pages/Config';
-import { getConfig, getCofre, getHealth, getSessoes, abrirStream } from './api';
+import { getConfig, getCofre, getHealth, getSessoes, getAchados, removerAchado, abrirStream } from './api';
 
 const VALIDAS: Page[] = PAGES.map((p) => p.id);
 
@@ -17,6 +18,7 @@ function lerPagina(): Page {
 export function App() {
   const [page, setPage] = useState<Page>(lerPagina());
   const [sessoes, setSessoes] = useState<Sessao[]>([]);
+  const [achados, setAchados] = useState<Achado[]>([]);
   const [config, setConfig] = useState<DiplomaConfig | null>(null);
   const [cofre, setCofre] = useState<EstadoCofre | null>(null);
   const [health, setHealth] = useState<HealthInfo | null>(null);
@@ -69,6 +71,10 @@ export function App() {
         });
       } else if (e.type === 'removida') {
         setSessoes((atual) => atual.filter((s) => s.id !== e.id));
+        setAchados((atual) => atual.filter((a) => a.sessaoId !== e.id));
+      } else if (e.type === 'achado') {
+        // Achado novo entra ao vivo; o mesmo id duas vezes (reconexão) não duplica.
+        setAchados((atual) => (atual.some((a) => a.id === e.achado.id) ? atual : [...atual, e.achado]));
       }
     }, setConectado);
     return fechar;
@@ -79,6 +85,7 @@ export function App() {
     void recarregarCofre();
     void recarregarSaude();
     void recarregarSessoes();
+    void getAchados().then(setAchados).catch(() => {});
 
     const onHash = () => setPage(lerPagina());
     window.addEventListener('hashchange', onHash);
@@ -121,6 +128,20 @@ export function App() {
     >
       {page === 'painel' && (
         <Painel sessoes={sessoes} config={config} onMudou={recarregarSessoes} />
+      )}
+      {page === 'achados' && (
+        <Achados
+          sessoes={sessoes}
+          achados={achados}
+          onRemover={async (id) => {
+            try {
+              await removerAchado(id);
+              setAchados((a) => a.filter((x) => x.id !== id));
+            } catch (err) {
+              alert(err instanceof Error ? err.message : String(err));
+            }
+          }}
+        />
       )}
       {page === 'entrega' && <Entrega />}
       {page === 'cofre' && (

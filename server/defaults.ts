@@ -19,6 +19,14 @@ export const DEFAULT_CONFIG: DiplomaConfig = {
   },
   tentativasPorQuiz: 1,
   permitirEntrega: false,
+  web: {
+    // Aberto por padrão porque "encontre tudo sobre" não cabe numa allowlist.
+    // O que protege o dono não é a lista, é a credencial presa ao host dela.
+    politicaPadrao: 'aberto',
+    listaGlobal: ['mercadolivre.com.br', 'olx.com.br', 'google.com', 'bing.com'],
+  },
+  perfil: { nome: '', cep: '', endereco: '', cidade: '', uf: '', telefone: '', email: '' },
+  brave: { pais: 'BR' },
   modelo: 'default',
   esforco: 'medium',
   instrucoes: '',
