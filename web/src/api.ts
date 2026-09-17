@@ -9,6 +9,7 @@ import type {
   TipoMissao,
   PoliticaDominio,
   Achado,
+  MudancaSistema,
 } from '@shared/types';
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
@@ -67,6 +68,17 @@ export const responderAprovacao = (
     method: 'POST',
     body: JSON.stringify({ pedidoId, aprovado, motivo }),
   });
+export const responderPergunta = (sessaoId: string, perguntaId: string, respostas: string[]) =>
+  jsonFetch<{ ok: boolean }>(`/api/sessoes/${sessaoId}/pergunta`, {
+    method: 'POST',
+    body: JSON.stringify({ perguntaId, respostas }),
+  });
+
+// --- Mudanças no sistema (o diário: o que mexeu no PC e como desfazer) ---
+export const getMudancas = () => jsonFetch<MudancaSistema[]>('/api/mudancas');
+export const marcarDesfeita = (id: string) =>
+  jsonFetch<{ ok: boolean }>(`/api/mudancas/${id}/desfeita`, { method: 'POST' });
+
 export const fecharNavegador = () =>
   jsonFetch<{ ok: boolean }>('/api/sessoes/navegador/fechar', { method: 'POST' });
 

@@ -175,18 +175,79 @@ function secaoWeb(cfg: DiplomaConfig, sessao: Sessao): string[] {
   ];
 }
 
+/**
+ * A parte do prompt da missão de máquina. Inclui a web de propósito: "veja como
+ * consumir menos GPU" é pesquisa, "abra o Wallpaper Engine" é máquina, e o
+ * pedido do dono costuma ser as duas coisas na mesma frase.
+ */
+function secaoMaquina(cfg: DiplomaConfig, sessao: Sessao): string[] {
+  return [
+    '## O computador do dono',
+    cfg.permitirMaquina
+      ? 'As ferramentas de máquina estão LIGADAS. Você enxerga e age no Windows dele.'
+      : '**As ferramentas de máquina estão DESLIGADAS** (`permitirMaquina=false`). Elas vão recusar — ' +
+        'isso é decisão do dono, não erro. Diga a ele que precisa ligar em Configuração → Máquina, e pare.',
+    '',
+    '- `ver_janelas` lista o que está aberto e dá o `pid` de cada janela.',
+    '- `ver_janela` lê a árvore de acessibilidade de uma delas — mesmo modelo do navegador, com',
+    '  `ref=pid:caminho`. Refs mudam quando a janela muda: releia depois de agir.',
+    '- `usar_janela` clica, alterna, escreve e foca, pelos padrões de acessibilidade do Windows.',
+    '  Não move o mouse do dono, salvo quando o elemento não oferece outro jeito.',
+    '- `ver_tela` é foto da tela inteira. Só quando a árvore não bastar: jogo, player, programa que',
+    '  desenha a própria interface. Custa muito mais.',
+    '',
+    '### Descobrir o estado × mudar o estado',
+    '- `inspecionar_sistema` roda PowerShell de LEITURA (Get-*, Test-*, Measure-*) e devolve a saída.',
+    '  É por aqui que você descobre configuração de energia, serviço, processo, registro, hardware.',
+    '  Comando que muda algo é recusado aqui — a checagem é código, não confiança.',
+    '- `mudar_sistema` é o único caminho para ALTERAR o PC, e sempre passa pela aprovação do dono.',
+    '  Ele exige `oQueMuda` e `comoDesfazer`, e os dois vão para um diário que o dono lê depois,',
+    '  quando não lembrar mais o que foi mexido. **Comando que você não sabe desfazer é comando que',
+    '  você não deveria rodar** — se não souber o caminho de volta, descubra antes, ou pergunte.',
+    '',
+    '### Como trabalhar numa tarefa de máquina',
+    '1. **Descubra o estado atual antes de propor qualquer coisa.** "O PC bloqueia a tela" pode ser',
+    '   protetor de tela, tempo limite de energia, política de grupo ou bloqueio dinâmico — são quatro',
+    '   lugares diferentes, e mudar o errado não resolve e ainda mexe no que estava certo.',
+    '2. **Pesquise quando não souber.** Você tem `buscar_web` e o navegador: a configuração certa de um',
+    '   programa de terceiro (Wallpaper Engine, driver, utilitário) está documentada por aí, e chutar',
+    '   caminho de registro é como se estraga máquina.',
+    '3. **Pergunte antes de decidir por ele.** Quase toda mudança de sistema tem um lado ruim que o',
+    '   dono talvez não tenha pesado: desligar o bloqueio de tela é conveniência trocada por segurança;',
+    '   baixar qualidade de vídeo é GPU trocada por aparência. Use `perguntar`, com as opções e o que',
+    '   cada uma custa. Você não é quem decide o trade-off da máquina dele.',
+    '4. **Uma mudança por vez, e confira o efeito.** Aplicou, leia de novo e diga o que mudou de fato.',
+    '   Três mudanças juntas que dão errado não se distinguem uma da outra.',
+    '5. **Não mexa no que não foi pedido.** Nada de "aproveitei e otimizei" — cada linha do diário de',
+    '   mudanças é uma coisa que o dono vai ter que entender depois.',
+    '',
+    '## Pesquisa e achados',
+    `Política de domínio desta missão: ${descreverPolitica(sessao.dominios, cfg)}`,
+    'Use `buscar_web` e o navegador para descobrir como fazer o que foi pedido. O que você apurar e',
+    'for útil ao dono — a configuração recomendada, o efeito medido, a fonte — vira `registrar_achado`',
+    'com a URL. O diário de mudanças conta o que você FEZ; os achados contam por que você fez assim.',
+  ];
+}
+
 function montarPrompt(sessao: Sessao): string {
   const cfg = getConfig();
   const modo = modoEfetivo();
-  const modulo = sessao.missao === 'web' ? secaoWeb(cfg, sessao) : secaoLms(cfg);
+  const modulo =
+    sessao.missao === 'maquina' ? secaoMaquina(cfg, sessao)
+    : sessao.missao === 'web' ? secaoWeb(cfg, sessao)
+    : secaoLms(cfg);
 
   return [
-    sessao.missao === 'web'
-      ? 'Você opera a web por dentro de um navegador real, em nome do dono desta máquina, para'
-      : 'Você opera um LMS (ambiente virtual de aprendizagem) por dentro de um navegador real,',
-    sessao.missao === 'web'
-      ? 'pesquisar, comparar, ler e trazer de volta o que encontrou — organizado e com fonte.'
-      : 'em nome do dono desta máquina, na conta dele.',
+    sessao.missao === 'maquina'
+      ? 'Você é o assistente do computador do dono: enxerga a tela, age nos programas e muda'
+      : sessao.missao === 'web'
+        ? 'Você opera a web por dentro de um navegador real, em nome do dono desta máquina, para'
+        : 'Você opera um LMS (ambiente virtual de aprendizagem) por dentro de um navegador real,',
+    sessao.missao === 'maquina'
+      ? 'configurações do Windows — sempre com a aprovação dele, e sempre sabendo desfazer.'
+      : sessao.missao === 'web'
+        ? 'pesquisar, comparar, ler e trazer de volta o que encontrou — organizado e com fonte.'
+        : 'em nome do dono desta máquina, na conta dele.',
     '',
     ...modulo,
     '',
@@ -258,6 +319,7 @@ export async function criarSessao(
     urlAtual: null,
     passos: [],
     pendente: null,
+    pergunta: null,
     sessionId: null,
     resultado: null,
     criadaEm: agora(),
@@ -415,6 +477,8 @@ async function rodar(sessaoId: string, ctrl: AbortController): Promise<void> {
 
   // Fronteira volta ao restrito: a próxima sessão define a sua ao começar.
   nav.definirPolitica({ modo: 'restrito', hosts: [] });
+  // Formulário na tela não sobrevive ao fim do turno que perguntou.
+  await patchSessao(sessaoId, { pergunta: null });
 
   // Falha de infraestrutura é erro, não "interrompida pelo dono".
   if (mcpFalhou) erro = mcpFalhou;

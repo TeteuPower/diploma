@@ -62,9 +62,9 @@ export interface PoliticaDominio {
 }
 
 /** O tipo de trabalho da sessão: muda o prompt, as ferramentas em foco e a política padrão. */
-export type TipoMissao = 'lms' | 'web';
+export type TipoMissao = 'lms' | 'web' | 'maquina';
 
-export const MISSOES: TipoMissao[] = ['lms', 'web'];
+export const MISSOES: TipoMissao[] = ['lms', 'web', 'maquina'];
 
 export interface ConfigWeb {
   /** Política que uma missão web recebe quando não declara a sua. */
@@ -96,6 +96,43 @@ export interface ConfigBrave {
 }
 
 /** De onde e como o app se atualiza. Mesmo contrato do Claude Indicator. */
+/** Pergunta estruturada do agente — o formulário que aparece na sessão. */
+export interface ItemPergunta {
+  pergunta: string;
+  /** Etiqueta curta que vira um chip acima da pergunta. */
+  etiqueta?: string;
+  /** Vazio ⇒ pergunta aberta (campo de texto). */
+  opcoes: Array<{ rotulo: string; descricao?: string }>;
+  /** true ⇒ pode marcar várias (caixinhas em vez de bolinhas). */
+  varias?: boolean;
+}
+
+export interface PerguntaAgente {
+  id: string;
+  at: string;
+  itens: ItemPergunta[];
+  /** O que ele já tentou e por que travou. */
+  contexto: string;
+}
+
+/**
+ * O que o agente mexeu na máquina — e como desfazer.
+ *
+ * Mora fora da sessão de propósito: mudança em PC continua valendo semana que
+ * vem, quando o dono não lembra mais que pediu.
+ */
+export interface MudancaSistema {
+  id: string;
+  sessaoId: string;
+  oQueMuda: string;
+  comando: string;
+  comoDesfazer: string;
+  saida: string;
+  ok: boolean;
+  desfeitaEm: string | null;
+  em: string;
+}
+
 export interface ConfigAtualizacao {
   /** Consultar o GitHub sozinho (no boot e a cada 6 h). */
   verificar: boolean;
@@ -143,6 +180,12 @@ export interface DiplomaConfig {
   perfil: Perfil;
   brave: ConfigBrave;
   atualizacao: ConfigAtualizacao;
+  /**
+   * Trava-mestre da máquina. Com false, NENHUMA ferramenta de desktop existe
+   * para o agente — nem ler a tela. Começa desligada: controlar o PC do dono é
+   * coisa que se liga de propósito, não que se descobre ligada.
+   */
+  permitirMaquina: boolean;
   /** Instruções livres que entram no system prompt (regras da disciplina etc). */
   instrucoes: string;
   navOrientation: NavOrientation;
@@ -226,6 +269,8 @@ export interface Sessao {
   passos: Passo[];
   /** Não-nulo ⇒ status 'aguardando' e a ferramenta está bloqueada esperando. */
   pendente: PedidoAprovacao | null;
+  /** Formulário de perguntas na tela. Também deixa a sessão 'aguardando'. */
+  pergunta: PerguntaAgente | null;
   /** session_id do Agent SDK, para retomar de onde parou. */
   sessionId: string | null;
   resultado: string | null;
@@ -277,6 +322,7 @@ export interface HealthInfo {
   auth: 'subscription' | 'apiKey';
   cofre: { disponivel: boolean; motivo: string | null; total: number };
   navegador: { instalado: boolean; aberto: boolean };
+  maquina: { disponivel: boolean; motivo: string | null; permitida: boolean };
   cwd: string;
   /** Instalado pelo Setup (dados em %LOCALAPPDATA%) ou rodando do código-fonte. */
   instalado: boolean;

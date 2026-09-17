@@ -8,6 +8,7 @@ import {
 import {
   criarSessao, pararSessao, retomarSessao, removerSessao, responderAprovacao,
 } from '../api';
+import { Perguntas } from '../components/Perguntas';
 
 /**
  * O cartão de aprovação. É a peça mais importante da tela: enquanto ele está
@@ -167,7 +168,7 @@ function CartaoSessao({ sessao, onMudou }: { sessao: Sessao; onMudou: () => void
             <span style={{ color: cor }}>{ROTULO_STATUS[sessao.status]}</span>
             <span>·</span>
             <span title={`domínios: ${sessao.dominios?.modo ?? 'restrito'}`}>
-              {sessao.missao === 'web' ? '🌐 web' : '🎓 lms'}
+              {sessao.missao === 'maquina' ? '🖥️ máquina' : sessao.missao === 'web' ? '🌐 web' : '🎓 lms'}
             </span>
             <span>·</span>
             <span style={{ color: CORES_MODO[sessao.modo] }}>{ROTULO_MODO[sessao.modo]}</span>
@@ -185,6 +186,12 @@ function CartaoSessao({ sessao, onMudou }: { sessao: Sessao; onMudou: () => void
           {sessao.pendente && (
             <div className="mb-4">
               <Aprovacao sessao={sessao} />
+            </div>
+          )}
+
+          {sessao.pergunta && (
+            <div className="mb-4">
+              <Perguntas sessao={sessao} />
             </div>
           )}
 
@@ -292,11 +299,12 @@ export function Painel({
     <div className="mx-auto flex max-w-4xl flex-col gap-5">
       <Panel title="Nova sessão" icon="▶️" accent="#38e0d8">
         {/* A missão muda o prompt, as ferramentas em foco e a fronteira de domínio. */}
-        <div className="mb-3 grid grid-cols-2 gap-2">
+        <div className="mb-3 grid grid-cols-3 gap-2">
           {(
             [
               ['web', '🌐', 'Web', 'Pesquisar, comparar, ler contas suas. Qualquer site https, salvo política.'],
               ['lms', '🎓', 'LMS', `Operar o ambiente de ensino apontado${config?.alvo.nome ? ` (${config.alvo.nome})` : ''}.`],
+              ['maquina', '🖥️', 'Máquina', 'Abrir programas, mexer em configurações do Windows, com pesquisa junto.'],
             ] as const
           ).map(([id, icone, rotulo, desc]) => (
             <button
@@ -322,7 +330,7 @@ export function Painel({
           </EmptyState>
         ) : (
           <>
-            {missao === 'web' && (
+            {missao !== 'lms' && (
               <div className="mb-3 grid gap-2 md:grid-cols-[240px_1fr]">
                 <Select value={politica} onChange={(e) => setPolitica(e.target.value as typeof politica)}>
                   <option value="padrao">
@@ -352,7 +360,9 @@ export function Painel({
               placeholder={
                 missao === 'web'
                   ? 'Ex.: Pesquise os melhores preços do tablet Samsung Galaxy Tab S8, novo, com frete para o meu CEP.'
-                  : 'Ex.: Entrar em Aulas, abrir a Fase 6 e mapear o que está pendente.'
+                  : missao === 'maquina'
+                    ? 'Ex.: Meu PC bloqueia a tela depois de alguns minutos — descubra por quê e me proponha como deixar ligado.'
+                    : 'Ex.: Entrar em Aulas, abrir a Fase 6 e mapear o que está pendente.'
               }
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void iniciar();

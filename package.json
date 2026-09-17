@@ -12,8 +12,8 @@
     "typecheck": "tsc --noEmit",
     "start": "tsx server/index.ts",
     "navegador": "playwright install chromium",
-    "teste": "tsx testes/cofre.ts && tsx testes/ferramentas.ts && tsx testes/atualizacao.ts && tsx testes/trabalhos.ts && tsx testes/navegador.ts",
-    "teste:rapido": "tsx testes/cofre.ts && tsx testes/ferramentas.ts && tsx testes/atualizacao.ts && tsx testes/trabalhos.ts",
+    "teste": "npm run teste:rapido && tsx testes/navegador.ts",
+    "teste:rapido": "tsx testes/cofre.ts && tsx testes/comandos.ts && tsx testes/perguntas.ts && tsx testes/ferramentas.ts && tsx testes/atualizacao.ts && tsx testes/trabalhos.ts",
     "empacotar": "powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1"
   },
   "dependencies": {

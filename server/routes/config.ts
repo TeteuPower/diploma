@@ -90,6 +90,8 @@ function limpar(bruto: unknown): Partial<DiplomaConfig> {
     };
   }
 
+  if (typeof b.permitirMaquina === 'boolean') out.permitirMaquina = b.permitirMaquina;
+
   if (b.brave && typeof b.brave === 'object') {
     const br = b.brave as Record<string, unknown>;
     out.brave = { pais: typeof br.pais === 'string' ? br.pais.trim().toUpperCase().slice(0, 2) : '' };

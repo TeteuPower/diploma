@@ -10,6 +10,8 @@ import { limparPendentes } from './aprovacao';
 import { initTentativas } from './tentativas';
 import { initTrabalhos } from './trabalhos';
 import { initAchados } from './achados';
+import { initMudancas } from './mudancas';
+import { limparPendentes as limparPerguntas } from './perguntas';
 import * as nav from './navegador';
 import './sse';
 import { configRouter } from './routes/config';
@@ -20,6 +22,7 @@ import { debugRouter } from './routes/debug';
 import { revisaoRouter } from './routes/revisao';
 import { entregaRouter } from './routes/entrega';
 import { achadosRouter } from './routes/achados';
+import { mudancasRouter } from './routes/mudancas';
 import { braveRouter } from './routes/brave';
 import { atualizacaoRouter } from './routes/atualizacao';
 import { navegadorRouter } from './routes/navegador';
@@ -31,6 +34,8 @@ async function main() {
   await initTentativas();
   await initTrabalhos();
   await initAchados();
+  await initMudancas();
+  limparPerguntas();
   limparPendentes();
   const orfas = await recuperarOrfas();
 
@@ -45,6 +50,7 @@ async function main() {
   app.use('/api/revisao', revisaoRouter);
   app.use('/api/entrega', entregaRouter);
   app.use('/api/achados', achadosRouter);
+  app.use('/api/mudancas', mudancasRouter);
   app.use('/api/brave', braveRouter);
   app.use('/api/atualizacao', atualizacaoRouter);
   app.use('/api/navegador', navegadorRouter);

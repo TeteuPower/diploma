@@ -67,9 +67,13 @@ export async function initStore(): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true });
   await Promise.all([configFile.load(), sessoesFile.load()]);
   // Sessões gravadas antes de existir "missão" eram todas LMS, no alvo restrito.
-  const migradas = sessoesFile.get().map((s) =>
-    s.missao ? s : { ...s, missao: 'lms' as const, dominios: { modo: 'restrito' as const, hosts: [] } },
-  );
+  const migradas = sessoesFile.get().map((s) => ({
+    ...s,
+    missao: s.missao ?? ('lms' as const),
+    dominios: s.dominios ?? { modo: 'restrito' as const, hosts: [] },
+    // Sessão gravada antes de existir pergunta estruturada não tem o campo.
+    pergunta: s.pergunta ?? null,
+  }));
   sessoesFile.setSync(migradas);
   // Migração leve: campos novos da config ganham o default sem perder o salvo.
   const merged: DiplomaConfig = {

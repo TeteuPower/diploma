@@ -8,10 +8,12 @@ import {
 import {
   patchConfig, fecharNavegador, getBrave, salvarChaveBrave, removerChaveBrave, testarBrave,
   getAtualizacao, verificarAtualizacao, instalarAtualizacao,
+  getMudancas, marcarDesfeita, getHealth,
   getInstalacaoChromium, instalarChromium,
   type EstadoAtualizacao, type InstalacaoChromium,
 } from '../api';
 import { dataHora } from '../lib/modo';
+import type { MudancaSistema, HealthInfo } from '@shared/types';
 
 const MODOS: ModoAutonomia[] = ['observar', 'assistido', 'guiado', 'autonomo'];
 
@@ -39,6 +41,13 @@ export function Config({
   const [atualizacao, setAtualizacao] = useState<EstadoAtualizacao | null>(null);
   const [verificando, setVerificando] = useState(false);
   const [instalacaoChromium, setInstalacaoChromium] = useState<InstalacaoChromium | null>(null);
+  const [mudancas, setMudancas] = useState<MudancaSistema[]>([]);
+  const [saude, setSaude] = useState<HealthInfo | null>(null);
+
+  useEffect(() => {
+    void getMudancas().then(setMudancas).catch(() => {});
+    void getHealth().then(setSaude).catch(() => {});
+  }, [config]);
 
   // Atualização e Chromium mudam por conta própria (download em andamento):
   // enquanto algo está rodando, a tela acompanha a cada 2 s.
@@ -497,6 +506,87 @@ export function Config({
         )}
         {instalacaoChromium?.ok === false && (
           <p className="mt-2 text-xs text-accent-rose">A instalação do Chromium falhou — veja o log.</p>
+        )}
+      </Panel>
+
+      <Panel
+        title="A sua máquina"
+        icon="🖥️"
+        accent={config.permitirMaquina ? '#f47174' : '#38e0d8'}
+        right={
+          <span className="text-[11px]" style={{ color: saude?.maquina.disponivel ? '#38e0d8' : '#f47174' }}>
+            {saude?.maquina.disponivel ? 'UI Automation disponível' : (saude?.maquina.motivo ?? 'verificando…')}
+          </span>
+        }
+      >
+        <p className="mb-4 text-xs leading-relaxed text-white/45">
+          Com isto ligado, o agente enxerga as janelas abertas, age nelas e pode alterar configurações
+          do Windows. Ler é livre; <strong className="text-white/70">mudar sempre passa pela sua
+          aprovação</strong>, e ele é obrigado a dizer o que muda e como desfazer — o que fica
+          registrado no diário abaixo.
+        </p>
+
+        <Toggle
+          checked={config.permitirMaquina}
+          onChange={(v) => {
+            if (v && !confirm('Ligar o controle da máquina? Ele passa a poder abrir programas, clicar neles e propor mudanças no Windows. Toda mudança ainda pede sua aprovação.')) return;
+            void salvar({ permitirMaquina: v });
+          }}
+          label="Deixar o agente usar o computador"
+          hint="Desligado, nenhuma ferramenta de desktop existe para ele — nem as de leitura."
+          danger
+        />
+
+        {config.permitirMaquina && (
+          <p className="mt-3 rounded-xl border border-accent-rose/30 bg-accent-rose/[0.07] p-3 text-xs leading-relaxed text-accent-rose/90">
+            Ligado. A trava que resta é o portão de aprovação: leia o comando e o "como desfazer" antes
+            de aprovar. Um comando que ele não sabe desfazer é um comando que não deveria rodar.
+          </p>
+        )}
+
+        {mudancas.length > 0 && (
+          <div className="mt-4">
+            <div className="label">Diário de mudanças no sistema</div>
+            <div className="flex flex-col gap-2">
+              {mudancas.slice(0, 8).map((m) => (
+                <div
+                  key={m.id}
+                  className={`rounded-xl border p-3 ${
+                    m.desfeitaEm ? 'border-white/10 bg-black/20 opacity-60' : 'border-accent-amber/25 bg-accent-amber/[0.05]'
+                  }`}
+                >
+                  <div className="mb-1 flex items-start justify-between gap-2">
+                    <span className="text-xs font-medium text-white/85">{m.oQueMuda}</span>
+                    <span className="shrink-0 text-[10px] text-white/30">{dataHora(m.em)}</span>
+                  </div>
+                  <pre className="mb-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px] text-white/45">
+                    {m.comando}
+                  </pre>
+                  <div className="text-[11px] text-white/55">
+                    <span className="text-white/35">desfazer: </span>
+                    {m.comoDesfazer}
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    {!m.ok && <span className="text-[10px] text-accent-rose">falhou</span>}
+                    {m.desfeitaEm ? (
+                      <span className="text-[10px] text-white/30">desfeita em {dataHora(m.desfeitaEm)}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-[10px] text-white/40 hover:text-accent"
+                        onClick={async () => {
+                          await marcarDesfeita(m.id);
+                          setMudancas(await getMudancas());
+                        }}
+                      >
+                        marcar como desfeita
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </Panel>
 

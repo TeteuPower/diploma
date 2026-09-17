@@ -12,7 +12,8 @@
  *   node ferramentas/ctl.mjs status
  *   node ferramentas/ctl.mjs log [n] [filtro]
  *   node ferramentas/ctl.mjs seguir [filtro]     # acompanha ao vivo
- *   node ferramentas/ctl.mjs nova "<objetivo>" [--lms|--web] [--aberto|--lista=a.com,b.com]
+ *   node ferramentas/ctl.mjs nova "<objetivo>" [--lms|--web|--maquina] [--aberto|--lista=a.com,b.com]
+ *   node ferramentas/ctl.mjs responder "<r1>" ["<r2>" ...]   # responde o formulario de perguntas
  *   node ferramentas/ctl.mjs achados [id]          # o que ele encontrou, com fonte
  *   node ferramentas/ctl.mjs brave chave <k> | pais <BR> | testar | remover
  *   node ferramentas/ctl.mjs passos [id] [n]
@@ -95,7 +96,25 @@ function seguir(filtro) {
   }, 400);
 }
 
+function mostrarPergunta(s) {
+  if (!s?.pergunta) return false;
+  const p = s.pergunta;
+  console.log(`
+[35m💬 PERGUNTA(S) DO AGENTE[0m`);
+  if (p.contexto) console.log(`   ${cortar(p.contexto, 300)}`);
+  p.itens.forEach((it, i) => {
+    console.log(`
+   ${i + 1}. ${it.pergunta}${it.etiqueta ? `  [${it.etiqueta}]` : ''}${it.varias ? '  (marque várias)' : ''}`);
+    for (const o of it.opcoes) console.log(`      - ${o.rotulo}${o.descricao ? `: ${o.descricao}` : ''}`);
+    if (!it.opcoes.length) console.log('      (resposta aberta)');
+  });
+  console.log(`
+   responda: ctl responder "<r1>" "<r2>" ...`);
+  return true;
+}
+
 function mostrarPendente(s) {
+  if (mostrarPergunta(s)) return true;
   if (!s?.pendente) return false;
   const p = s.pendente;
   console.log(`\n\x1b[33m⏸  APROVAÇÃO PENDENTE\x1b[0m  (${p.acao})`);
@@ -148,6 +167,7 @@ try {
       for (const w of resto) {
         if (w === '--web') missao = 'web';
         else if (w === '--lms') missao = 'lms';
+        else if (w === '--maquina') missao = 'maquina';
         else if (w === '--aberto') dominios = { modo: 'aberto', hosts: [] };
         else if (w.startsWith('--lista=')) dominios = { modo: 'lista', hosts: w.slice(8).split(',').filter(Boolean) };
         else palavras.push(w);
@@ -163,6 +183,18 @@ try {
           (s.dominios.hosts.length ? ` (${s.dominios.hosts.join(', ')})` : '') +
           `\nobjetivo: ${s.objetivo}`,
       );
+      break;
+    }
+
+    case 'responder': {
+      // Responde o formulário de perguntas na ordem em que ele aparece.
+      const s = await sessaoAtual();
+      if (!s?.pergunta) throw new Error('não há pergunta aberta');
+      await api(`/sessoes/${s.id}/pergunta`, {
+        method: 'POST',
+        body: JSON.stringify({ perguntaId: s.pergunta.id, respostas: resto }),
+      });
+      console.log('✅ respondido: ' + resto.join(' | '));
       break;
     }
 

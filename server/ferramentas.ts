@@ -11,6 +11,10 @@ import { gerarPdf } from './pdf';
 import { compactar } from './compactar';
 import * as achados from './achados';
 import * as brave from './brave';
+import * as maquina from './maquina';
+import * as mudancas from './mudancas';
+import { classificar } from './comandos';
+import { sanear, perguntar as perguntarAoDono } from './perguntas';
 import { log, aviso, erro as logErro, cronometro } from './log';
 
 export const SERVIDOR_MCP = 'lms';
@@ -758,23 +762,250 @@ export function criarServidorLms(sessaoId: string) {
   );
 
   // -------------------------------------------------------------------------
+  // A máquina do dono
+  // -------------------------------------------------------------------------
+
+  /**
+   * A trava-mestre. Sem ela, nenhuma ferramenta de desktop faz nada — nem as
+   * de leitura. Controlar o PC do dono é coisa que se liga de propósito.
+   */
+  function maquinaLiberada(): string | null {
+    if (getConfig().permitirMaquina) return null;
+    return (
+      'as ferramentas de máquina estão DESLIGADAS (permitirMaquina=false). ' +
+      'Isso é configuração do dono, não erro — peça a ele para ligar em Configuração → Máquina ' +
+      'se a tarefa realmente precisar mexer no computador.'
+    );
+  }
+
+  const verJanelas = ferramenta(
+    'ver_janelas',
+    'Lista as janelas abertas no Windows: nome, tipo e o pid, que é por onde você pede a árvore ' +
+      'de uma delas. Comece por aqui quando a tarefa envolver um programa do computador.',
+    {},
+    async () => {
+      const travada = maquinaLiberada();
+      if (travada) return texto(`AÇÃO NÃO EXECUTADA. ${travada}`);
+      try {
+        const js = await maquina.janelas();
+        await appendPasso(sessaoId, 'leu', `Listou ${js.length} janela(s) abertas`, { ferramenta: 'ver_janelas' });
+        if (!js.length) return texto('Nenhuma janela visível.');
+        return texto(
+          js.map((j) => `pid=${j.pid} [${j.tipo}] "${j.nome}" — ${j.largura}x${j.altura} em (${j.x},${j.y})`).join('\n'),
+        );
+      } catch (err) {
+        return texto(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
+  const verJanela = ferramenta(
+    'ver_janela',
+    'Lê a árvore de acessibilidade de UMA janela (pelo pid de `ver_janelas`) — o mesmo modelo do ' +
+      'navegador: cada elemento com um `ref=pid:caminho` que as ações usam. Refs mudam quando a ' +
+      'janela muda: leia de novo depois de agir.',
+    {
+      pid: z.number().describe('O pid da janela, vindo de `ver_janelas`'),
+      maxLinhas: z.number().min(20).max(800).default(250),
+    },
+    async ({ pid, maxLinhas }) => {
+      const travada = maquinaLiberada();
+      if (travada) return texto(`AÇÃO NÃO EXECUTADA. ${travada}`);
+      try {
+        const arv = await maquina.arvore(pid, maxLinhas);
+        await appendPasso(sessaoId, 'leu', `Leu a janela pid=${pid}`, { ferramenta: 'ver_janela' });
+        return texto(arv);
+      } catch (err) {
+        return texto(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
+  const verTela = ferramenta(
+    'ver_tela',
+    'Foto da tela inteira. Use quando a árvore não bastar — jogo, player de vídeo, programa que ' +
+      'desenha a própria interface (Wallpaper Engine, editores). Custa muito mais que `ver_janela`.',
+    { motivo: z.string().describe('Por que a árvore não bastou aqui') },
+    async ({ motivo }) => {
+      const travada = maquinaLiberada();
+      if (travada) return texto(`AÇÃO NÃO EXECUTADA. ${travada}`);
+      try {
+        const c = await maquina.captura();
+        await appendPasso(sessaoId, 'leu', `Capturou a tela: ${motivo}`, { ferramenta: 'ver_tela' });
+        return {
+          content: [
+            { type: 'image' as const, data: c.base64, mimeType: 'image/jpeg' },
+            { type: 'text' as const, text: `Tela ${c.largura}x${c.altura}.` },
+          ],
+        } as unknown as Conteudo;
+      } catch (err) {
+        return texto(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
+  const usarJanela = ferramenta(
+    'usar_janela',
+    'Age num elemento de uma janela pelo ref de `ver_janela`: clicar num botão, marcar uma caixa, ' +
+      'escrever num campo, focar a janela. Usa os padrões de acessibilidade do Windows — não move ' +
+      'o mouse do dono, salvo quando o elemento não oferece outro jeito.',
+    {
+      acao: z.enum(['clicar', 'alternar', 'escrever', 'focar']),
+      ref: z.string().optional().describe('ref do elemento (ex.: 13340:1.0.2). Para "focar", use pid.'),
+      pid: z.number().optional().describe('Só para "focar": a janela a trazer para a frente'),
+      texto: z.string().optional().describe('Só para "escrever": o conteúdo do campo'),
+      porque: z.string().describe('O que você espera que aconteça'),
+    },
+    ({ acao, ref, pid, texto: conteudo, porque }) => {
+      const travada = maquinaLiberada();
+      if (travada) return Promise.resolve(texto(`AÇÃO NÃO EXECUTADA. ${travada}`));
+
+      // Mexer na janela de um programa é interação, como clicar numa página: o
+      // que exige aprovação é MUDAR O SISTEMA, que tem ferramenta própria.
+      return portao('interacao', `${acao} em ${ref ?? `pid ${pid}`}: ${porque}`, conteudo ?? '', async () => {
+        try {
+          let r: string;
+          if (acao === 'focar') {
+            if (!pid) return texto('ERRO: "focar" precisa do pid.');
+            r = await maquina.focar(pid);
+          } else if (acao === 'escrever') {
+            if (!ref || conteudo === undefined) return texto('ERRO: "escrever" precisa de ref e texto.');
+            r = await maquina.escrever(ref, conteudo);
+          } else if (acao === 'alternar') {
+            if (!ref) return texto('ERRO: "alternar" precisa de ref.');
+            r = await maquina.alternar(ref);
+          } else {
+            if (!ref) return texto('ERRO: "clicar" precisa de ref.');
+            r = await maquina.clicar(ref);
+          }
+          await appendPasso(sessaoId, 'agiu', `${r} — ${porque}`, { ferramenta: 'usar_janela' });
+          return texto(`${r}\n\nLeia a janela de novo com ver_janela: os refs mudaram.`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await appendPasso(sessaoId, 'erro', `Falha ao ${acao}: ${msg}`, { ferramenta: 'usar_janela' });
+          return texto(`ERRO: ${msg}`);
+        }
+      });
+    },
+  );
+
+  const inspecionarSistema = ferramenta(
+    'inspecionar_sistema',
+    'Roda um comando PowerShell de LEITURA e devolve a saída: Get-*, Test-*, Measure-*, e os ' +
+      'cmdlets que só formatam (Select/Where/Sort/Format). Serve para descobrir o estado do PC — ' +
+      'energia, serviços, processos, registro, hardware. Qualquer coisa que MUDE algo é recusada ' +
+      'aqui: para isso existe `mudar_sistema`.',
+    { comando: z.string(), porque: z.string().describe('O que você quer descobrir') },
+    async ({ comando, porque }) => {
+      const travada = maquinaLiberada();
+      if (travada) return texto(`AÇÃO NÃO EXECUTADA. ${travada}`);
+
+      // A classificação é código, não confiança: ver server/comandos.ts.
+      const v = classificar(comando);
+      if (!v.leitura) {
+        aviso('maquina', 'comando de leitura recusado', { comando: comando.slice(0, 160), motivo: v.motivo });
+        await appendPasso(sessaoId, 'recusado', `Comando recusado como leitura: ${v.motivo}`, {
+          ferramenta: 'inspecionar_sistema',
+        });
+        return texto(
+          `AÇÃO NÃO EXECUTADA — isto não é leitura: ${v.motivo}. ` +
+            'Se a intenção é mesmo mudar o sistema, use `mudar_sistema`, que passa pela aprovação do dono.',
+        );
+      }
+
+      const r = await maquina.executar(comando, 60000);
+      await appendPasso(sessaoId, 'leu', `Inspecionou o sistema: ${porque}`, { ferramenta: 'inspecionar_sistema' });
+      return texto(r.saida);
+    },
+  );
+
+  const mudarSistema = ferramenta(
+    'mudar_sistema',
+    'Roda um comando PowerShell que MUDA a máquina do dono (energia, registro, serviço, tarefa ' +
+      'agendada, configuração de programa). SEMPRE passa pela aprovação dele. Você é obrigado a ' +
+      'dizer o que muda e como desfazer — e o "como desfazer" vai para um diário que o dono lê ' +
+      'depois, quando não lembrar mais o que foi mexido. Comando que você não sabe desfazer é ' +
+      'comando que você não deveria rodar.',
+    {
+      comando: z.string().describe('O comando PowerShell, completo'),
+      oQueMuda: z.string().describe('Em uma frase, o que muda no PC depois disso'),
+      comoDesfazer: z.string().describe('O comando ou o caminho exato para voltar ao estado anterior'),
+    },
+    ({ comando, oQueMuda, comoDesfazer }) => {
+      const travada = maquinaLiberada();
+      if (travada) return Promise.resolve(texto(`AÇÃO NÃO EXECUTADA. ${travada}`));
+
+      const detalhe = [
+        `O QUE MUDA: ${oQueMuda}`,
+        '',
+        'COMANDO:',
+        comando,
+        '',
+        `COMO DESFAZER: ${comoDesfazer}`,
+      ].join('\n');
+
+      return portao('submeter', `Mudar o sistema: ${oQueMuda}`, detalhe, async () => {
+        const r = await maquina.executar(comando, 120000);
+        await mudancas.registrar({ sessaoId, oQueMuda, comando, comoDesfazer, saida: r.saida, ok: r.ok });
+        await appendPasso(
+          sessaoId,
+          r.ok ? 'agiu' : 'erro',
+          `${r.ok ? 'Mudou o sistema' : 'Falhou ao mudar o sistema'}: ${oQueMuda}`,
+          { ferramenta: 'mudar_sistema' },
+        );
+        return texto(
+          `${r.ok ? 'Aplicado' : 'FALHOU'}. Saída:\n${r.saida}\n\n` +
+            'Registrado no diário de mudanças, com o modo de desfazer. Confira se o efeito é o esperado.',
+        );
+      });
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // Diálogo com o dono
   // -------------------------------------------------------------------------
 
   const perguntar = ferramenta(
     'perguntar',
-    'Pergunta ao dono quando você está genuinamente travado: captcha, 2FA, questão ' +
-      'ambígua, algo que só ele sabe. Bloqueia até ele responder.',
+    'PERGUNTE ao dono quando a decisão for DELE — um caminho que muda o rumo do trabalho, um ' +
+      'trade-off que só ele sabe pesar, captcha ou 2FA, algo que você não tem como deduzir. ' +
+      'Vira um FORMULÁRIO na tela (bolinhas, caixinhas, campo de texto), não um parágrafo. ' +
+      'Mande TODAS as perguntas numa chamada só: ele vê o formulário inteiro e decide de uma vez. ' +
+      'A ferramenta fica parada até ele responder. NÃO use para confirmar o óbvio nem para narrar.',
     {
-      pergunta: z.string(),
-      contexto: z.string().describe('O que você já tentou e por que travou'),
+      questions: z
+        .array(
+          z.object({
+            question: z.string().describe('A pergunta, escrita para uma pessoa — clara e específica.'),
+            header: z.string().optional().describe('Etiqueta curta que vira um chip (ex.: "Energia", "Escopo"). Até 24 caracteres.'),
+            multiSelect: z.boolean().optional().describe('true = ele pode marcar VÁRIAS opções. Vale por pergunta.'),
+            options: z
+              .array(
+                z.object({
+                  label: z.string().describe('O texto do botão — curto; é a identidade da escolha.'),
+                  description: z.string().optional().describe('O que essa opção IMPLICA — a consequência, não o rótulo repetido.'),
+                }),
+              )
+              .optional()
+              .describe('2 a 4 opções (até 6 aceitas). OMITA para pergunta ABERTA, com campo de texto.'),
+          }),
+        )
+        .describe('1 a 4 perguntas. Acima disso o excedente é cortado — agrupe por tema.'),
+      contexto: z.string().describe('O que você já tentou e por que está travado'),
     },
-    async ({ pergunta, contexto }) => {
-      const d = await pedir(sessaoId, 'submeter', `Pergunta: ${pergunta}`, contexto);
+    async (input) => {
+      const itens = sanear(input as { questions?: unknown });
+      // Nada aproveitável: não inventa formulário meio pronto — cai no caminho
+      // que sempre existiu, o pedido de aprovação em texto.
+      if (!itens.length) {
+        const d = await pedir(sessaoId, 'submeter', 'Pergunta ao dono', (input as { contexto?: string }).contexto ?? '');
+        return texto(d.aprovado ? `O dono confirmou: ${d.motivo}` : `O dono respondeu: ${d.motivo}`);
+      }
+      const r = await perguntarAoDono(sessaoId, itens, (input as { contexto?: string }).contexto ?? '');
       return texto(
-        d.aprovado
-          ? `O dono confirmou. Observação: ${d.motivo}. Siga.`
-          : `O dono respondeu: ${d.motivo}`,
+        r.respondida
+          ? `O dono respondeu:\n\n${r.resposta}\n\nSiga o trabalho com isso.`
+          : `AÇÃO NÃO EXECUTADA — ${r.resposta}. Não chute a decisão: encerre dizendo o que ficou pendente.`,
       );
     },
   );
@@ -798,6 +1029,7 @@ export function criarServidorLms(sessaoId: string) {
       clicar, escreverCampo, escolher,
       entrar, submeter,
       escrever, lerArquivo, listarArquivos, apagarArquivo, baixarAnexo, gerarPdfTool, compactarTool, notaTool, revisarTool, registrarAchado, dadosPessoais, buscarWeb,
+      verJanelas, verJanela, verTela, usarJanela, inspecionarSistema, mudarSistema,
       perguntar, anotar,
     ],
   });
@@ -809,5 +1041,6 @@ export const FERRAMENTAS_LMS = [
   'clicar', 'escrever', 'escolher',
   'entrar', 'submeter',
   'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'apagar_arquivo', 'baixar_anexo', 'gerar_pdf', 'compactar', 'nota_para_dono', 'revisar_entregaveis', 'registrar_achado', 'dados_pessoais', 'buscar_web',
+  'ver_janelas', 'ver_janela', 'ver_tela', 'usar_janela', 'inspecionar_sistema', 'mudar_sistema',
   'perguntar', 'anotar',
 ].map((n) => `mcp__${SERVIDOR_MCP}__${n}`);

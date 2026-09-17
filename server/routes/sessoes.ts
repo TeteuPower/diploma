@@ -5,6 +5,7 @@ import { removerDaSessao } from '../achados';
 import { MISSOES } from '../../shared/types';
 import type { TipoMissao, PoliticaDominio } from '../../shared/types';
 import { responder } from '../aprovacao';
+import { responder as responderPergunta } from '../perguntas';
 import { adicionarCliente } from '../sse';
 import * as nav from '../navegador';
 
@@ -85,6 +86,20 @@ sessoesRouter.post('/:id/aprovacao', async (req, res) => {
   if (!ok) {
     return res.status(409).json({ error: 'esse pedido não está mais esperando resposta' });
   }
+  res.json({ ok: true });
+});
+
+/** O dono enviou o formulário de perguntas: destrava a ferramenta que espera. */
+sessoesRouter.post('/:id/pergunta', async (req, res) => {
+  const { perguntaId, respostas } = (req.body ?? {}) as Record<string, unknown>;
+  if (typeof perguntaId !== 'string') {
+    return res.status(400).json({ error: 'perguntaId é obrigatório' });
+  }
+  const lista = Array.isArray(respostas)
+    ? respostas.map((r) => (typeof r === 'string' ? r.slice(0, 2000) : ''))
+    : [];
+  const ok = await responderPergunta(req.params.id, perguntaId, lista);
+  if (!ok) return res.status(409).json({ error: 'essa pergunta não está mais esperando resposta' });
   res.json({ ok: true });
 });
 
