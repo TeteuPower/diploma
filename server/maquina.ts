@@ -93,11 +93,32 @@ export async function arvore(pid: number, maxLinhas = 250): Promise<string> {
     cortado: a.cortado,
     ms: medir(),
   });
+  // Guarda o nome de cada ref deste instantâneo, para conferir na hora de agir.
+  for (const linha of a.linhas.split('\n')) {
+    const m = /^\s*- \S+ "(.*?)" ref=(\d+:[\d.]+)/.exec(linha);
+    if (m) nomesPorRef.set(m[2], m[1]);
+  }
+
   const rodape = a.cortado
     ? `\n\n[cortado em ${maxLinhas} linhas — use maxLinhas maior, ou foque numa parte da janela]`
     : `\n\n[${a.total} elementos]`;
   return `Janela: ${a.titulo} (pid ${a.pid})\n\n${a.linhas}${rodape}`;
 }
+
+/**
+ * O nome que cada ref tinha no último instantâneo, por janela.
+ *
+ * Serve para conferir antes de agir. O índice de irmão MUDA quando a árvore
+ * muda: na Calculadora o botão "Um" saiu de `1.1.1.6.1` para `1.1.1.5.1` entre
+ * duas leituras, e sem conferência o caminho antigo resolveria para outro botão
+ * — clique errado, silencioso, com cara de sucesso. No navegador esse problema
+ * não existe porque o ref é carimbado no próprio elemento; aqui o ref é um
+ * caminho, então a conferência é o que faz as vezes do carimbo.
+ *
+ * Guardado no processo do servidor, que é longo — o PowerShell é que morre a
+ * cada chamada. Só o último instantâneo de cada pid importa.
+ */
+const nomesPorRef = new Map<string, string>();
 
 /** Ref no formato `pid:caminho` (ex.: `13340:1.0.0.2`). */
 function partirRef(ref: string): { pid: string; caminho: string } {
@@ -106,10 +127,16 @@ function partirRef(ref: string): { pid: string; caminho: string } {
   return { pid: m[1], caminho: m[2] };
 }
 
+/** Os argumentos de conferência, quando sabemos que nome esperar naquele ref. */
+function esperado(ref: string): string[] {
+  const nome = nomesPorRef.get(ref.trim());
+  return nome ? ['-Esperado', nome] : [];
+}
+
 export async function clicar(ref: string): Promise<string> {
   const { pid, caminho } = partirRef(ref);
   const r = await rodarJson<{ via: string; alvo: string }>(
-    ['-Acao', 'clicar', '-Processo', pid, '-Caminho', caminho],
+    ['-Acao', 'clicar', '-Processo', pid, '-Caminho', caminho, ...esperado(ref)],
   );
   log('maquina', 'clicou', { ref, via: r.via, alvo: r.alvo });
   return `cliquei em "${r.alvo}" (via ${r.via})`;
@@ -118,7 +145,7 @@ export async function clicar(ref: string): Promise<string> {
 export async function escrever(ref: string, texto: string): Promise<string> {
   const { pid, caminho } = partirRef(ref);
   const r = await rodarJson<{ via: string }>(
-    ['-Acao', 'escrever', '-Processo', pid, '-Caminho', caminho, '-Texto', texto],
+    ['-Acao', 'escrever', '-Processo', pid, '-Caminho', caminho, '-Texto', texto, ...esperado(ref)],
   );
   log('maquina', 'escreveu', { ref, via: r.via, chars: texto.length });
   return `escrevi no campo (via ${r.via})`;
@@ -127,7 +154,7 @@ export async function escrever(ref: string, texto: string): Promise<string> {
 export async function alternar(ref: string): Promise<string> {
   const { pid, caminho } = partirRef(ref);
   const r = await rodarJson<{ antes: string; depois: string }>(
-    ['-Acao', 'alternar', '-Processo', pid, '-Caminho', caminho],
+    ['-Acao', 'alternar', '-Processo', pid, '-Caminho', caminho, ...esperado(ref)],
   );
   log('maquina', 'alternou', { ref, antes: r.antes, depois: r.depois });
   return `alternei: ${r.antes} → ${r.depois}`;

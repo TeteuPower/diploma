@@ -24,6 +24,7 @@ param(
     [string]$Programa = '',
     [string]$Argumentos = '',
     [int]$Segundos = 15,
+    [string]$Esperado = '',
     [int]$Processo = 0,
     [string]$Caminho = '',
     [string]$Texto = '',
@@ -71,9 +72,14 @@ function Get-JanelaPorPid([int]$alvo) {
     $j
 }
 
-<#  Anda o caminho de índices a partir da janela. Confere que o elemento ainda
-    é do tipo esperado: árvore que mudou devolve erro em vez de agir no vizinho. #>
-function Resolve-Caminho([int]$alvo, [string]$caminhoTxt) {
+<#  Anda o caminho de indices a partir da janela.
+
+    A CONFERENCIA do nome no fim nao e zelo: o indice do irmao MUDA quando a
+    arvore muda. Na Calculadora, o botao "Um" saiu de 1.1.1.6.1 para 1.1.1.5.1
+    entre duas leituras, e sem conferir o caminho antigo resolveria para outro
+    botao — clique errado, silencioso, com cara de sucesso. Ref que nao bate
+    falha alto, e o agente le de novo (igual a ref velho de pagina recarregada). #>
+function Resolve-Caminho([int]$alvo, [string]$caminhoTxt, [string]$esperado = '') {
     $el = Get-JanelaPorPid $alvo
     if (-not $caminhoTxt) { return $el }
     $condFilhos = New-Object System.Windows.Automation.PropertyCondition($AE::IsControlElementProperty, $true)
@@ -84,6 +90,12 @@ function Resolve-Caminho([int]$alvo, [string]$caminhoTxt) {
             throw "o caminho nao existe mais (indice $idx de $($filhos.Count)) — tire um instantaneo novo"
         }
         $el = $filhos.Item($idx)
+    }
+    if ($esperado) {
+        $atual = ($el.Current.Name -replace '\s+', ' ').Trim()
+        if ($atual -ne $esperado) {
+            throw "a arvore mudou: neste caminho havia '$esperado' e agora ha '$atual'. Leia a janela de novo."
+        }
     }
     $el
 }
@@ -218,14 +230,14 @@ switch ($Acao) {
     }
 
     'clicar' {
-        $el = Resolve-Caminho $Processo $Caminho
+        $el = Resolve-Caminho $Processo $Caminho $Esperado
         $via = Invoke-Elemento $el
         Start-Sleep -Milliseconds 350
         Saida ([ordered]@{ ok = $true; via = $via; alvo = $el.Current.Name })
     }
 
     'alternar' {
-        $el = Resolve-Caminho $Processo $Caminho
+        $el = Resolve-Caminho $Processo $Caminho $Esperado
         $t = $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
         $antes = $t.Current.ToggleState
         $t.Toggle()
@@ -234,7 +246,7 @@ switch ($Acao) {
     }
 
     'escrever' {
-        $el = Resolve-Caminho $Processo $Caminho
+        $el = Resolve-Caminho $Processo $Caminho $Esperado
         try {
             $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Texto)
             Saida ([ordered]@{ ok = $true; via = 'value' })
