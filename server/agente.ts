@@ -10,6 +10,7 @@ import {
 } from './store';
 import type { ModoAutonomia, Sessao, TipoMissao, PoliticaDominio, DiplomaConfig } from '../shared/types';
 import { normalizarHost } from './hosts';
+import { log, erro as logErro } from './log';
 import { configurada as braveConfigurada } from './brave';
 
 /**
@@ -125,7 +126,7 @@ function secaoWeb(cfg: DiplomaConfig, sessao: Sessao): string[] {
     '## Achados: o que você encontrou, com fonte',
     'Todo resultado relevante vira um `registrar_achado` — não fica só no seu texto final. É o',
     'que o dono confere depois, item a item, com o link de onde veio:',
-    '- `produto`: preço como NÚMERO em `dados.preco` (só dígitos e ponto, ex. 2899.90), mais',
+    '- `produto`: em `dados`, pares {chave, valor} — `preco` como NÚMERO (ex. 2899.9), mais',
     '  `vendedor`, `condicao` (novo/usado), `frete`, `site`, `link`. Registre os melhores,',
     '  não todos: 5 a 10 ofertas boas valem mais que 40 iguais.',
     '- `fato`: uma informação verificável, com a página onde está escrita.',
@@ -317,8 +318,15 @@ async function rodar(sessaoId: string, ctrl: AbortController): Promise<void> {
     systemPrompt: montarPrompt(sessao),
     mcpServers: { [SERVIDOR_MCP]: criarServidorLms(sessaoId) },
     allowedTools: FERRAMENTAS_LMS,
-    // O agente opera o LMS, não a máquina: sem Bash, sem Edit, sem Read de disco.
-    disallowedTools: ['Bash', 'Edit', 'Write', 'Read', 'Glob', 'Grep', 'Agent', 'Task', 'WebFetch'],
+    // Toolset base VAZIO: o agente só tem as ferramentas do nosso servidor MCP.
+    // Isso não é preferência, é lição: quando um schema quebrou o servidor MCP,
+    // o agente caiu no toolset padrão do Claude Code e apareceu com PowerShell
+    // na mão. `disallowedTools` fica como segunda tranca, caso o preset mude.
+    tools: [],
+    disallowedTools: [
+      'Bash', 'PowerShell', 'Edit', 'Write', 'Read', 'Glob', 'Grep', 'Agent', 'Task',
+      'WebFetch', 'WebSearch', 'NotebookEdit', 'MultiEdit', 'TodoWrite', 'Skill', 'Artifact',
+    ],
     permissionMode: 'bypassPermissions',
     maxTurns: cfg.navegador.maxPassos,
     // Esforço de raciocínio: vale a pena em questão difícil, onde a alternativa
@@ -332,6 +340,8 @@ async function rodar(sessaoId: string, ctrl: AbortController): Promise<void> {
 
   let relato = '';
   let erro: string | null = null;
+  /** Preenchido quando o servidor MCP não conectou: a sessão não pode seguir sem ferramenta. */
+  let mcpFalhou: string | null = null;
 
   try {
     for await (const msg of query({ prompt: sessao.objetivo, options: opcoes })) {
@@ -340,6 +350,31 @@ async function rodar(sessaoId: string, ctrl: AbortController): Promise<void> {
           if (msg.subtype === 'init') {
             registrarOrigem(msg.apiKeySource as string);
             await patchSessao(sessaoId, { sessionId: msg.session_id });
+
+            // O que o agente REALMENTE tem na mão, segundo o SDK — não o que
+            // pedimos. Se o nosso servidor não conectou, parar aqui é a única
+            // saída honesta: sem navegador ele improvisa, e improviso aqui já
+            // significou "relatório sem uma ferramenta chamada".
+            const init = msg as unknown as {
+              tools?: string[];
+              mcp_servers?: Array<{ name: string; status: string }>;
+            };
+            const servidores = init.mcp_servers ?? [];
+            const nosso = servidores.find((x) => x.name === SERVIDOR_MCP);
+            log('agente', 'init do SDK', {
+              ferramentas: init.tools?.length ?? 0,
+              amostra: (init.tools ?? []).slice(0, 6),
+              mcp: servidores.map((x) => `${x.name}:${x.status}`),
+            });
+            if (!nosso || nosso.status !== 'connected') {
+              mcpFalhou =
+                `o servidor de ferramentas "${SERVIDOR_MCP}" não conectou ` +
+                `(status: ${nosso?.status ?? 'ausente'}). Sessão abortada antes de agir.`;
+              logErro('agente', 'servidor MCP indisponível — abortando', null, {
+                mcp: servidores,
+              });
+              ctrl.abort();
+            }
           }
           break;
         }
@@ -378,7 +413,9 @@ async function rodar(sessaoId: string, ctrl: AbortController): Promise<void> {
   // Fronteira volta ao restrito: a próxima sessão define a sua ao começar.
   nav.definirPolitica({ modo: 'restrito', hosts: [] });
 
-  const abortada = ctrl.signal.aborted;
+  // Falha de infraestrutura é erro, não "interrompida pelo dono".
+  if (mcpFalhou) erro = mcpFalhou;
+  const abortada = ctrl.signal.aborted && !mcpFalhou;
   await patchSessao(sessaoId, {
     status: abortada ? 'interrompida' : erro ? 'erro' : 'concluida',
     pendente: null,

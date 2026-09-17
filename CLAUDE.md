@@ -132,6 +132,21 @@ Painel deslizante fechado, menu fora da tela, modal em `left:-9999px`: tudo isso
 recortado por `overflow:hidden`). Conteúdo abaixo da dobra continua entrando: **filtrar demais é pior
 que filtrar de menos**. Como rede final, `clicar` tem prazo curto e plano B — normal → forçado → DOM.
 
+### A armadilha do `z.record` (e por que o toolset base é vazio)
+
+A conversão zod→JSON Schema do Agent SDK **quebra em `tools/list`** quando qualquer ferramenta usa
+`z.record`, em qualquer forma. Não há exceção no boot nem erro no log: o servidor MCP inteiro fica
+indisponível, e o agente cai no toolset **padrão do Claude Code** — apareceu com PowerShell na mão e
+"concluiu" uma sessão web sem chamar uma ferramenta sequer. Bisseção em
+[testes/ferramentas.ts](testes/ferramentas.ts); o mesmo teste é canário para o dia em que o SDK
+consertar. Campo aberto vira **lista de pares** `{chave, valor}` (`registrar_achado`).
+
+Duas trancas vieram disso, em [server/agente.ts](server/agente.ts):
+- `tools: []` — toolset base vazio; o agente só tem o nosso servidor MCP. `disallowedTools`
+  continua como segunda tranca.
+- No `init` do SDK, se `mcp_servers` não traz o nosso servidor como `connected`, a sessão **aborta
+  com erro antes de agir**. Sem navegador ele improvisa, e improviso aqui já custou uma sessão.
+
 ### A armadilha do `evaluate`
 
 `coletarInstantaneo` é serializada para dentro da página **pelo seu próprio texto**. Duas coisas

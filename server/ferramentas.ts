@@ -653,16 +653,25 @@ export function criarServidorLms(sessaoId: string) {
   const registrarAchado = ferramenta(
     'registrar_achado',
     'Registra algo que você encontrou, com a URL de onde veio. É o que o dono confere depois, ' +
-      'item a item, na página Achados. Produto: ponha o preço como NÚMERO em dados.preco ' +
-      '(ex. 2899.9), mais vendedor, condicao, frete, site, link. Sem fonte não é achado.',
+      'item a item, na página Achados. Produto: em `dados`, um par {chave:"preco", valor:2899.9} ' +
+      'com o preço como NÚMERO, mais vendedor, condicao, frete, site, link. Sem fonte não é achado.',
     {
       tipo: z.enum(['produto', 'fato', 'documento', 'pessoa', 'contato', 'outro']),
       titulo: z.string().describe('Curto e específico, ex.: "Galaxy Tab S8 128GB Wi-Fi — Mercado Livre"'),
       resumo: z.string().describe('O que é e por que importa, em 1-3 frases'),
+      // Lista de pares, não `z.record`: a conversão zod→JSON Schema do SDK
+      // quebra em tools/list com record em QUALQUER forma, e um schema quebrado
+      // derruba o servidor MCP inteiro — o agente fica sem navegador e cai no
+      // toolset padrão do Claude Code. Bisseção em testes/ferramentas.ts.
       dados: z
-        .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
-        .default({})
-        .describe('Campos estruturados: preco, vendedor, condicao, frete, link, data...'),
+        .array(
+          z.object({
+            chave: z.string().describe('ex.: preco, vendedor, condicao, frete, link'),
+            valor: z.union([z.string(), z.number(), z.boolean()]),
+          }),
+        )
+        .optional()
+        .describe('Campos estruturados como pares. preco como NÚMERO (ex. 2899.9).'),
       fonte: z.string().describe('URL exata da página onde você viu isto'),
       confianca: z.enum(['alta', 'media', 'baixa']).default('media'),
     },
@@ -672,7 +681,9 @@ export function criarServidorLms(sessaoId: string) {
       } catch {
         return texto(`ERRO: "fonte" precisa ser uma URL válida (recebi "${fonte}"). Sem fonte não é achado.`);
       }
-      const a = await achados.registrar({ sessaoId, tipo, titulo, resumo, dados, fonte, confianca });
+      const mapa: Record<string, string | number | boolean> = {};
+      for (const { chave, valor } of dados ?? []) mapa[chave.trim()] = valor;
+      const a = await achados.registrar({ sessaoId, tipo, titulo, resumo, dados: mapa, fonte, confianca });
       await appendPasso(sessaoId, 'agiu', `Registrou achado (${tipo}): ${a.titulo}`, {
         ferramenta: 'registrar_achado',
         url: fonte,
