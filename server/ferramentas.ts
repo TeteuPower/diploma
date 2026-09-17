@@ -979,6 +979,122 @@ export function criarServidorLms(sessaoId: string) {
     },
   );
 
+  const abrirPrograma = ferramenta(
+    'abrir_programa',
+    'Abre um programa no Windows. Aceita o nome ("notepad", "wallpaper64") ou o caminho completo ' +
+      'do .exe. Devolve o pid, que é por onde `ver_janela` enxerga a interface dele depois. ' +
+      'Se não souber o executável, procure antes com `inspecionar_sistema` (Get-ChildItem, ' +
+      'Get-StartApps) ou na web.',
+    {
+      programa: z.string().describe('Nome no PATH ou caminho completo do executável'),
+      argumentos: z.string().optional().describe('Argumentos de linha de comando, se precisar'),
+      esperarJanela: z.string().optional().describe('Trecho do título da janela a aguardar (recomendado: programa demora a abrir)'),
+    },
+    ({ programa, argumentos, esperarJanela }) => {
+      const travada = maquinaLiberada();
+      if (travada) return Promise.resolve(texto(`AÇÃO NÃO EXECUTADA. ${travada}`));
+
+      // Abrir programa muda o que está na tela do dono, mas não altera nada de
+      // forma persistente: é interação, como clicar. O que pede aprovação é
+      // MUDAR configuração, que tem ferramenta própria.
+      return portao('interacao', `Abrir ${programa}`, argumentos ?? '', async () => {
+        try {
+          const r = await maquina.abrirPrograma(programa, argumentos ?? '');
+          let extra = '';
+          if (esperarJanela) {
+            const j = await maquina.esperarJanela(esperarJanela, 20);
+            extra = j.achou
+              ? `\nA janela "${j.nome}" apareceu (pid ${j.pid}) — leia com ver_janela.`
+              : `\nA janela com "${esperarJanela}" não apareceu em 20 s. Veja ver_janelas: o título pode ser outro.`;
+          }
+          await appendPasso(sessaoId, 'agiu', `Abriu ${programa} (pid ${r.pid})`, { ferramenta: 'abrir_programa' });
+          return texto(`abri "${r.nome}" (pid ${r.pid}).${extra}`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await appendPasso(sessaoId, 'erro', `Falha ao abrir ${programa}: ${msg}`, { ferramenta: 'abrir_programa' });
+          return texto(`ERRO: ${msg}`);
+        }
+      });
+    },
+  );
+
+  const usarTeclado = ferramenta(
+    'teclado',
+    'Manda teclas para a janela em foco: um atalho ("win+r", "ctrl+s", "alt+f4", "ctrl+shift+esc") ' +
+      'e/ou texto para digitar. Serve quando o programa não expõe o controle na árvore de ' +
+      'acessibilidade — menu que só abre por atalho, campo sem nome, diálogo do sistema. ' +
+      'Atenção: vai para quem estiver em FOCO, então garanta o foco antes (usar_janela → focar).',
+    {
+      atalho: z.string().optional().describe('Combinação, ex.: "win+r", "ctrl+shift+n", "alt+f4"'),
+      texto: z.string().optional().describe('Texto literal a digitar'),
+      porque: z.string().describe('O que você espera que aconteça'),
+    },
+    ({ atalho, texto: conteudo, porque }) => {
+      const travada = maquinaLiberada();
+      if (travada) return Promise.resolve(texto(`AÇÃO NÃO EXECUTADA. ${travada}`));
+      if (!atalho && !conteudo) return Promise.resolve(texto('ERRO: informe `atalho`, `texto`, ou os dois.'));
+
+      return portao('interacao', `Teclado: ${atalho ?? ''} ${conteudo ? `"${conteudo.slice(0, 40)}"` : ''} — ${porque}`, '', async () => {
+        try {
+          const r = await maquina.teclado(atalho ?? '', conteudo ?? '');
+          await appendPasso(sessaoId, 'agiu', `Teclado: ${r} — ${porque}`, { ferramenta: 'teclado' });
+          return texto(`${r}. Leia a tela de novo para ver o efeito.`);
+        } catch (err) {
+          return texto(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+    },
+  );
+
+  const esperarJanelaTool = ferramenta(
+    'esperar_janela',
+    'Espera uma janela cujo título contenha o texto dado. Use depois de abrir um programa ou de ' +
+      'uma ação que demora — programa recém-aberto leva segundos até existir na árvore.',
+    {
+      titulo: z.string().describe('Trecho do título, sem diferenciar maiúsculas'),
+      segundos: z.number().min(1).max(120).default(20),
+    },
+    async ({ titulo, segundos }) => {
+      const travada = maquinaLiberada();
+      if (travada) return texto(`AÇÃO NÃO EXECUTADA. ${travada}`);
+      try {
+        const j = await maquina.esperarJanela(titulo, segundos);
+        return texto(
+          j.achou
+            ? `apareceu: "${j.nome}" (pid ${j.pid}).`
+            : `não apareceu em ${segundos}s. Use ver_janelas para conferir o título real.`,
+        );
+      } catch (err) {
+        return texto(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
+  const transferencia = ferramenta(
+    'area_transferencia',
+    'Lê ou escreve a área de transferência do Windows. Útil para tirar texto de um programa que ' +
+      'não expõe o conteúdo na árvore (copie com ctrl+c e leia aqui), ou para colar algo grande ' +
+      'sem digitar caractere por caractere.',
+    {
+      acao: z.enum(['ler', 'escrever']),
+      texto: z.string().optional().describe('Só para "escrever"'),
+    },
+    async ({ acao, texto: conteudo }) => {
+      const travada = maquinaLiberada();
+      if (travada) return texto(`AÇÃO NÃO EXECUTADA. ${travada}`);
+      try {
+        if (acao === 'ler') {
+          const t = await maquina.lerTransferencia();
+          return texto(t ? t.slice(0, 8000) : '(área de transferência vazia)');
+        }
+        if (conteudo === undefined) return texto('ERRO: "escrever" precisa de texto.');
+        return texto(await maquina.escreverTransferencia(conteudo));
+      } catch (err) {
+        return texto(`ERRO: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
   // -------------------------------------------------------------------------
   // Diálogo com o dono
   // -------------------------------------------------------------------------
@@ -1048,6 +1164,7 @@ export function criarServidorLms(sessaoId: string) {
       entrar, submeter,
       escrever, lerArquivo, listarArquivos, apagarArquivo, baixarAnexo, gerarPdfTool, compactarTool, notaTool, revisarTool, registrarAchado, dadosPessoais, buscarWeb,
       verJanelas, verJanela, verTela, usarJanela, inspecionarSistema, mudarSistema,
+      abrirPrograma, usarTeclado, esperarJanelaTool, transferencia,
       perguntar, anotar,
     ],
   });
@@ -1060,5 +1177,6 @@ export const FERRAMENTAS_LMS = [
   'entrar', 'submeter',
   'escrever_arquivo', 'ler_arquivo', 'listar_arquivos', 'apagar_arquivo', 'baixar_anexo', 'gerar_pdf', 'compactar', 'nota_para_dono', 'revisar_entregaveis', 'registrar_achado', 'dados_pessoais', 'buscar_web',
   'ver_janelas', 'ver_janela', 'ver_tela', 'usar_janela', 'inspecionar_sistema', 'mudar_sistema',
+  'abrir_programa', 'teclado', 'esperar_janela', 'area_transferencia',
   'perguntar', 'anotar',
 ].map((n) => `mcp__${SERVIDOR_MCP}__${n}`);

@@ -14,11 +14,16 @@
     de mover o mouse: não roubam o cursor do dono e funcionam com a janela
     parcialmente coberta. Clique por coordenada é o último recurso.
 
-    Uso:  -Acao janelas | arvore | clicar | escrever | alternar | captura | focar
+    Uso:  -Acao janelas | arvore | clicar | escrever | alternar | captura | focar |
+          abrir | teclado | esperar | ler-transferencia | escrever-transferencia
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Acao,
+    [string]$Atalho = '',
+    [string]$Programa = '',
+    [string]$Argumentos = '',
+    [int]$Segundos = 15,
     [int]$Processo = 0,
     [string]$Caminho = '',
     [string]$Texto = '',
@@ -169,6 +174,38 @@ function Invoke-Elemento($el) {
     'coordenada'
 }
 
+
+<#  Teclas: nome legivel -> codigo virtual. So o que um atalho precisa; letra e
+    digito vao pelo codigo ASCII do proprio caractere. #>
+$VK = @{
+  'win'=0x5B; 'ctrl'=0x11; 'control'=0x11; 'alt'=0x12; 'shift'=0x10;
+  'enter'=0x0D; 'return'=0x0D; 'tab'=0x09; 'esc'=0x1B; 'escape'=0x1B;
+  'space'=0x20; 'backspace'=0x08; 'delete'=0x2E; 'del'=0x2E; 'home'=0x24; 'end'=0x23;
+  'pgup'=0x21; 'pgdn'=0x22; 'up'=0x26; 'down'=0x28; 'left'=0x25; 'right'=0x27;
+  'f1'=0x70; 'f2'=0x71; 'f3'=0x72; 'f4'=0x73; 'f5'=0x74; 'f6'=0x75;
+  'f7'=0x76; 'f8'=0x77; 'f9'=0x78; 'f10'=0x79; 'f11'=0x7A; 'f12'=0x7B;
+}
+
+<#  Atalho de verdade (inclusive com a tecla Windows, que o SendKeys nao alcanca):
+    pressiona os modificadores, bate a tecla final, solta na ordem inversa. #>
+function Enviar-Atalho([string]$combo) {
+  Add-Type -Namespace Win32 -Name Tecla -MemberDefinition @'
+[DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, int e);
+'@ -ErrorAction SilentlyContinue
+
+  $partes = $combo.ToLower().Split('+') | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+  if (-not $partes) { throw "atalho vazio" }
+  $codigos = @()
+  foreach ($t in $partes) {
+    if ($VK.ContainsKey($t)) { $codigos += $VK[$t] }
+    elseif ($t.Length -eq 1) { $codigos += [byte][char]($t.ToUpper()) }
+    else { throw "tecla desconhecida: $t" }
+  }
+  foreach ($c in $codigos) { [Win32.Tecla]::keybd_event([byte]$c, 0, 0, 0); Start-Sleep -Milliseconds 30 }
+  [array]::Reverse($codigos)
+  foreach ($c in $codigos) { [Win32.Tecla]::keybd_event([byte]$c, 0, 2, 0); Start-Sleep -Milliseconds 30 }
+}
+
 switch ($Acao) {
     'janelas' { Saida (Get-Janelas) }
 
@@ -228,6 +265,47 @@ switch ($Acao) {
         $peq.Save($ms, $codec, $par)
         $g.Dispose(); $g2.Dispose(); $bmp.Dispose(); $peq.Dispose()
         Saida ([ordered]@{ ok = $true; largura = $larg; altura = $alt; base64 = [Convert]::ToBase64String($ms.ToArray()) })
+    }
+
+    'abrir' {
+        # Start-Process resolve caminho completo, nome no PATH e App Paths do
+        # registro — e assim "wallpaper64" ou o .exe inteiro funcionam igual.
+        $p = if ($Argumentos) { Start-Process -FilePath $Programa -ArgumentList $Argumentos -PassThru }
+             else { Start-Process -FilePath $Programa -PassThru }
+        Start-Sleep -Milliseconds 700
+        Saida ([ordered]@{ ok = $true; processo = $p.Id; nome = $p.ProcessName })
+    }
+
+    'teclado' {
+        if ($Atalho) { Enviar-Atalho $Atalho }
+        if ($Texto) {
+            # SendKeys trata +^%~(){}[] como sintaxe: escapamos para digitar literal.
+            [System.Windows.Forms.SendKeys]::SendWait(($Texto -replace '([+^%~(){}\[\]])', '{$1}'))
+        }
+        Start-Sleep -Milliseconds 250
+        Saida ([ordered]@{ ok = $true; atalho = $Atalho; chars = $Texto.Length })
+    }
+
+    'esperar' {
+        # Programa recem-aberto leva um tempo ate a janela existir na arvore da UIA.
+        $fim = (Get-Date).AddSeconds($Segundos)
+        do {
+            foreach ($j in (Get-Janelas)) {
+                if ($j.nome -like "*$Texto*") { Saida ([ordered]@{ ok = $true; achou = $true; processo = $j.pid; nome = $j.nome }); exit 0 }
+            }
+            Start-Sleep -Milliseconds 500
+        } while ((Get-Date) -lt $fim)
+        Saida ([ordered]@{ ok = $true; achou = $false })
+    }
+
+    'ler-transferencia' {
+        $t = Get-Clipboard -Raw
+        Saida ([ordered]@{ ok = $true; texto = if ($t) { $t } else { '' } })
+    }
+
+    'escrever-transferencia' {
+        Set-Clipboard -Value $Texto
+        Saida ([ordered]@{ ok = $true; chars = $Texto.Length })
     }
 
     default { throw "acao desconhecida: $Acao" }

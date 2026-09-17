@@ -209,3 +209,55 @@ export async function disponivel(): Promise<{ ok: boolean; motivo: string | null
     return { ok: false, motivo: m };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Primitivas de desktop: abrir, teclar, esperar, área de transferência
+// ---------------------------------------------------------------------------
+
+/**
+ * Abre um programa. `Start-Process` resolve caminho completo, nome no PATH e o
+ * App Paths do registro — então tanto `notepad` quanto o `.exe` inteiro valem.
+ * Devolve o pid, que é por onde `arvore()` enxerga a janela depois.
+ */
+export async function abrirPrograma(programa: string, argumentos = ''): Promise<{ pid: number; nome: string }> {
+  const args = ['-Acao', 'abrir', '-Programa', programa];
+  if (argumentos) args.push('-Argumentos', argumentos);
+  const r = await rodarJson<{ processo: number; nome: string }>(args, 30000);
+  log('maquina', 'abriu programa', { programa, argumentos, pid: r.processo, nome: r.nome });
+  return { pid: r.processo, nome: r.nome };
+}
+
+/**
+ * Teclado. `atalho` é uma combinação legível ("win+r", "ctrl+shift+esc",
+ * "alt+f4") e vai por `keybd_event`, que alcança a tecla Windows — o SendKeys
+ * não alcança. `texto` é digitação literal.
+ */
+export async function teclado(atalho = '', texto = ''): Promise<string> {
+  if (!atalho && !texto) throw new Error('teclado precisa de atalho ou texto');
+  const args = ['-Acao', 'teclado'];
+  if (atalho) args.push('-Atalho', atalho);
+  if (texto) args.push('-Texto', texto);
+  await rodarJson(args, 30000);
+  log('maquina', 'teclado', { atalho, chars: texto.length });
+  return [atalho && `atalho ${atalho}`, texto && `digitei ${texto.length} caractere(s)`].filter(Boolean).join(' + ');
+}
+
+/** Espera uma janela cujo título contenha o texto. Programa recém-aberto demora a existir na UIA. */
+export async function esperarJanela(titulo: string, segundos = 15): Promise<{ achou: boolean; pid?: number; nome?: string }> {
+  const r = await rodarJson<{ achou: boolean; processo?: number; nome?: string }>(
+    ['-Acao', 'esperar', '-Texto', titulo, '-Segundos', String(segundos)],
+    (segundos + 10) * 1000,
+  );
+  log('maquina', 'esperou janela', { titulo, achou: r.achou, pid: r.processo });
+  return { achou: r.achou, pid: r.processo, nome: r.nome };
+}
+
+export async function lerTransferencia(): Promise<string> {
+  const r = await rodarJson<{ texto: string }>(['-Acao', 'ler-transferencia']);
+  return r.texto;
+}
+
+export async function escreverTransferencia(texto: string): Promise<string> {
+  await rodarJson(['-Acao', 'escrever-transferencia', '-Texto', texto]);
+  return `área de transferência com ${texto.length} caractere(s)`;
+}
