@@ -63,6 +63,37 @@ mudanca('$x = Get-Process', 'atribuição não é reconhecida como leitura');
 mudanca('Copy-Item a b', 'Copy-Item escreve');
 mudanca('Export-Csv -Path x.csv', 'Export grava');
 
+// Numa sessão real o agente perdeu um turno com `powercfg /query` recusado —
+// leitura legítima barrada. Liberar o subcomando de consulta é o ganho; não
+// deixar o de escrita passar junto é o que este bloco protege.
+console.log('\nExecutáveis nativos em modo de consulta:');
+leitura('powercfg /query');
+leitura('powercfg /list');
+leitura('powercfg /getactivescheme');
+leitura('reg query "HKCU\\Control Panel\\Desktop"');
+leitura('sc query Spooler');
+leitura('schtasks /query /tn "\\Microsoft\\Windows\\Defrag\\ScheduledDefrag"');
+leitura('netsh advfirewall show allprofiles');
+leitura('ipconfig /all');
+leitura('tasklist');
+leitura('nvidia-smi');
+
+console.log('\nOs mesmos executáveis em modo de escrita (tem que barrar):');
+mudanca('powercfg /change monitor-timeout-ac 0');
+mudanca('powercfg /setacvalueindex SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 0');
+mudanca('reg add HKCU\\Software\\X /v Y /d 1');
+mudanca('reg delete HKCU\\Software\\X /f');
+mudanca('sc config Spooler start= disabled');
+mudanca('sc stop Spooler');
+mudanca('schtasks /create /tn X /tr Y /sc daily');
+mudanca('schtasks /delete /tn X /f');
+mudanca('netsh advfirewall set allprofiles state off', 'set não é consulta');
+mudanca('netsh interface ip add address', 'add não é consulta');
+mudanca('netsh advfirewall show allprofiles | Out-File x.txt', 'grava arquivo');
+mudanca('powercfg', 'sem subcomando não é consulta');
+mudanca('taskkill /IM notepad.exe /F');
+mudanca('wmic process call create notepad');
+
 console.log('\nBordas:');
 mudanca('', 'vazio');
 mudanca('   ', 'só espaço');

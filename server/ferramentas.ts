@@ -114,9 +114,12 @@ export function criarServidorLms(sessaoId: string) {
     // sai desta máquina para o LMS. Perguntar ao dono seria perder o ponto —
     // ele já respondeu quando deixou a trava fechada.
     const ENTREGA: AcaoSensivel[] = ['submeter', 'enviar_arquivo', 'marcar_concluido'];
-    // A trava é do módulo LMS. Numa missão web, o que segura compra, mensagem
-    // ou publicação é o portão de aprovação do modo — logo abaixo.
-    const ehLms = getSessao(sessaoId)?.missao !== 'web';
+    // A trava é do módulo LMS — e SÓ dele. Escrita como `!== 'web'`, ela pegava
+    // a missão de máquina junto: `mudar_sistema` (que passa por `submeter`) era
+    // barrada antes do portão, e a proposta nunca chegava à tela do dono. Cada
+    // módulo tem a sua trava: LMS tem permitirEntrega, máquina tem
+    // permitirMaquina, web tem a política de domínio.
+    const ehLms = getSessao(sessaoId)?.missao === 'lms';
     if (ehLms && ENTREGA.includes(acao as AcaoSensivel) && !getConfig().permitirEntrega) {
       const motivo =
         'a trava de entrega está fechada (permitirEntrega=false): produzir arquivo pode, ' +
@@ -691,14 +694,29 @@ export function criarServidorLms(sessaoId: string) {
         )
         .optional()
         .describe('Campos estruturados como pares. preco como NÚMERO (ex. 2899.9).'),
-      fonte: z.string().describe('URL exata da página onde você viu isto'),
+      fonte: z
+        .string()
+        .describe(
+          'De onde veio: a URL exata da página, OU uma origem local quando o dado é da máquina ' +
+            '(ex.: "registro:HKLM\SYSTEM\...\VIDEOIDLE", "powercfg /query", "janela: Wallpaper Engine").',
+        ),
       confianca: z.enum(['alta', 'media', 'baixa']).default('media'),
     },
     async ({ tipo, titulo, resumo, dados, fonte, confianca }) => {
-      try {
-        new URL(fonte);
-      } catch {
-        return texto(`ERRO: "fonte" precisa ser uma URL válida (recebi "${fonte}"). Sem fonte não é achado.`);
+      // Achado sem procedência não existe — mas procedência nem sempre é URL.
+      // Numa missão de máquina a fonte é o registro do Windows ou a tela de um
+      // programa, e exigir URL ali obrigava o agente a deixar de registrar o
+      // que tinha apurado (aconteceu numa sessão real).
+      const proc = fonte.trim();
+      if (proc.length < 4) {
+        return texto(`ERRO: "fonte" está vazia ou curta demais ("${fonte}"). Sem procedência não é achado.`);
+      }
+      if (proc.includes('://')) {
+        try {
+          new URL(proc);
+        } catch {
+          return texto(`ERRO: "fonte" parece URL mas não é válida ("${fonte}").`);
+        }
       }
       const mapa: Record<string, string | number | boolean> = {};
       for (const { chave, valor } of dados ?? []) mapa[chave.trim()] = valor;

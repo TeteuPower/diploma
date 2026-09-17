@@ -72,16 +72,59 @@ const PROIBIDO_NA_LEITURA: Array<[RegExp, string]> = [
   [/\$\(/, 'subexpressão $( ) pode conter outro comando'],
   [/`/, 'crase escapa caractere e confunde a leitura'],
   [/\bcmd(\.exe)?\b|\bpowershell(\.exe)?\b|\bpwsh\b/i, 'shell aninhado'],
-  [/\breg(\.exe)?\s|\bpowercfg\b|\bnetsh\b|\bsc(\.exe)?\s|\btaskkill\b|\bschtasks\b|\bwmic\b|\bbcdedit\b|\bdiskpart\b/i,
+  // `format` precisa de fronteira que exclua hífen: `\bformat\b` casava com
+  // `Format-List`, e a saída formatada mais comum do PowerShell virava "mudança".
+  [/\btaskkill\b|\bwmic\b|\bbcdedit\b|\bdiskpart\b|(?<![\w-])format(\.com)?(?![\w-])/i,
     'executável nativo que altera o sistema'],
   [/\bremove-|\bset-|\bnew-|\bstart-|\bstop-|\brestart-|\badd-|\bclear-|\bdisable-|\benable-|\binstall-|\buninstall-|\brename-|\bmove-|\bcopy-|\bexport-|\bimport-|\bregister-|\bunregister-|\bsuspend-|\bresume-|\bout-file\b/i,
     'verbo que altera estado'],
 ];
 
+/**
+ * Executáveis do Windows cujo PRIMEIRO argumento decide tudo: `powercfg /query`
+ * lê, `powercfg /setacvalueindex` muda. Banir o executável inteiro era seguro e
+ * caro — numa sessão real o agente perdeu um turno com `powercfg /query`
+ * recusado e teve de reconstruir a mesma informação pelo registro.
+ *
+ * A lista é curta de propósito: cada entrada é um subcomando que eu confirmei
+ * que só consulta. Subcomando fora dela cai em "mudança", como antes.
+ */
+const NATIVOS_LEITURA = new Map<string, Set<string>>([
+  ['powercfg', new Set(['/query', '-query', '/q', '/list', '-list', '/l', '/getactivescheme', '-getactivescheme'])],
+  ['reg', new Set(['query'])],
+  ['sc', new Set(['query', 'queryex', 'qc', 'enumdepend'])],
+  ['schtasks', new Set(['/query'])],
+  ['netsh', new Set([])], // só com "show" adiante — tratado abaixo
+  ['ipconfig', new Set(['', '/all'])],
+  ['systeminfo', new Set([''])],
+  ['tasklist', new Set([''])],
+  ['whoami', new Set([''])],
+  ['nvidia-smi', new Set([''])],
+]);
+
 export interface Veredito {
   leitura: boolean;
   /** Por que não é leitura. Vazio quando é. */
   motivo: string;
+}
+
+/** O segmento é um executável nativo chamado em modo de consulta? */
+function nativoDeLeitura(tokens: string[]): boolean {
+  const exe = (tokens[0] ?? '').toLowerCase().replace(/\.exe$/, '');
+  const permitidos = NATIVOS_LEITURA.get(exe);
+  if (!permitidos) return false;
+
+  // `netsh` é a exceção: o verbo de consulta pode vir em qualquer posição
+  // (`netsh advfirewall show allprofiles`), e sem um `show`/`dump` explícito
+  // ele altera. Exigimos o verbo e proibimos os que escrevem.
+  if (exe === 'netsh') {
+    const resto = tokens.slice(1).map((t) => t.toLowerCase());
+    if (!resto.some((t) => t === 'show' || t === 'dump')) return false;
+    return !resto.some((t) => ['set', 'add', 'delete', 'reset', 'import'].includes(t));
+  }
+
+  const sub = (tokens[1] ?? '').toLowerCase();
+  return permitidos.has(sub);
 }
 
 /**
@@ -106,11 +149,12 @@ export function classificar(comando: string): Veredito {
   if (!segmentos.length) return { leitura: false, motivo: 'comando vazio' };
 
   for (const seg of segmentos) {
-    const primeiro = (seg.split(/\s+/)[0] ?? '').toLowerCase().replace(/^&\s*/, '');
+    const tokens = seg.split(/\s+/).filter(Boolean);
+    const primeiro = (tokens[0] ?? '').toLowerCase().replace(/^&\s*/, '');
     const nome = ALIASES_LEITURA.get(primeiro) ?? primeiro;
-    if (!CMDLETS_LEITURA.has(nome)) {
-      return { leitura: false, motivo: `"${primeiro || seg}" não está na lista de comandos de leitura` };
-    }
+    if (CMDLETS_LEITURA.has(nome)) continue;
+    if (nativoDeLeitura(tokens)) continue;
+    return { leitura: false, motivo: `"${primeiro || seg}" não está na lista de comandos de leitura` };
   }
 
   return { leitura: true, motivo: '' };
