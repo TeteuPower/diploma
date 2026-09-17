@@ -212,6 +212,60 @@ o agente acessa o que está público ou o que é conta do próprio dono; não bu
 paywall ou captcha de terceiros, não acessa conta alheia, não explora falha de site. Esse limite
 não é configurável.
 
+## Instalar e atualizar — o contrato do Claude Indicator
+
+O Diploma é um programa instalado, não um repositório que se roda com npm. O contrato de release
+e atualização é o mesmo do [claude-indicator](../claude-indicator/): releases do GitHub, o app se
+troca sozinho.
+
+### O que o `build.ps1` monta em `publish\`
+
+| arquivo | por quê |
+|---|---|
+| `Diploma.exe` | `node.exe` portátil **renomeado**. O processo se chama Diploma, e é esse nome que o instalador mata (`taskkill /IM`) na atualização. Node não se importa com o próprio nome. |
+| `app\server.mjs` | O servidor inteiro num bundle ESM (esbuild) com `--packages=external`: o SDK da Anthropic e o Playwright carregam binário por caminho e não sobrevivem a bundle. Fica em `app\` porque `env.ts` calcula a raiz como "um nível acima" — vale em dev e instalado. |
+| `web\dist\` | A interface. |
+| `node_modules\` | Só produção, `--ignore-scripts`. O que pesa é o `claude.exe` do SDK (220 MB; lzma2 comprime bem). |
+| `package.json` | **A única fonte da versão.** `env.ts` lê daqui; o build passa a mesma ao Inno por `/DMyAppVersion`; o nome do `.exe` a carrega. |
+| `.instalado` | Marcador. Com ele, dados vão para `%LOCALAPPDATA%\Diploma` e o updater pode trocar arquivos. Não é env (atalho do Windows não define) nem heurística de caminho (erra para instalação por usuário). |
+
+Dados do dono (cofre, sessões, perfil do navegador, `trabalhos/`) ficam **fora** da pasta do app,
+que é trocada inteira a cada update. Desinstalar não apaga `%LOCALAPPDATA%\Diploma` — de propósito:
+há trabalho de faculdade lá. `DIPLOMA_HOME` aponta para outro lugar.
+
+O Chromium **não** vem no instalador: ~150 MB que mudam a cada versão do Playwright e que ele já
+guarda em `%LOCALAPPDATA%\ms-playwright`, onde sobrevivem a update. Quem baixa é o próprio
+Playwright, chamado com o node empacotado (`Diploma.exe node_modules\playwright\cli.js install
+chromium`) — tarefa opcional no Setup, botão na Configuração e rota `/api/navegador/instalar`.
+
+### O updater ([server/atualizacao.ts](server/atualizacao.ts))
+
+1. Lista `releases?per_page=15` e escolhe a **maior versão** — não a `latest` da API, que ignora
+   pré-release e é justamente como sai a build de cada push.
+2. Versão: tag numérica (`v1.2.0`) > nome do instalador (`Diploma-Setup-X.Y.Z.exe`, o **maior** se
+   houver mais de um) > nome da release. Instalador de outro app não conta.
+3. Baixa para `%TEMP%\DiplomaUpdate` com progresso, roda `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`.
+   Silencioso, o instalador não pede elevação sozinho: se a pasta do app não for gravável, o app
+   pede via `Start-Process -Verb RunAs`.
+4. O instalador mata o `Diploma.exe`, troca a pasta e reabre (`[Run]` com `Check: WizardSilent`).
+   Este processo morre no meio — é o esperado; a UI trata a queda da conexão como sucesso.
+
+Rodando do código-fonte (sem `.instalado`): verificar funciona, **instalar é recusado** — a troca
+seria em cima do repositório. Cache de 6 h entre consultas não forçadas (API pública: 60/hora).
+Comparador e leitor de releases têm 23 asserções em [testes/atualizacao.ts](testes/atualizacao.ts).
+
+### Releases ([.github/workflows/build.yml](.github/workflows/build.yml))
+
+- Todo push na `master` atualiza a pré-release **`latest`** no lugar (link estável, um `.exe` só).
+- Tag `v*` cria a release **numerada**, `--latest` na página. Subir versão: `package.json` →
+  commit → `git tag vX.Y.Z` → push da tag.
+- CI roda `teste:rapido` (sem Chromium) e `build.ps1 -SemTestes`.
+
+### Duas armadilhas de encoding
+
+`build.ps1` e `installer.iss` precisam de **BOM UTF-8**: o Windows PowerShell 5.1 lê `.ps1` sem BOM
+como ANSI e um `não` no meio de uma string quebra o parser; o Inno faz o mesmo com o `.iss`.
+
 ## O canal de controle (`ctl`)
 
 A interface é para o dono. Para desenvolver existe [ferramentas/ctl.mjs](ferramentas/ctl.mjs), que

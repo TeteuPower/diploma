@@ -3,7 +3,22 @@
 Copiloto que acessa um LMS por dentro de um navegador real, lê as atividades e responde — com você
 decidindo quanta corda ele tem. Roda inteiro na sua máquina: sem nuvem, sem banco, sem API key.
 
-## Instalar
+## Instalar (Windows)
+
+Baixe o `Diploma-Setup-X.Y.Z.exe` na página de
+[Releases](https://github.com/TeteuPower/diploma/releases) e rode. Instala por usuário, sem admin;
+o Setup oferece baixar o navegador (Chromium, ~150 MB) na hora — se pular, há um botão na
+Configuração para fazer isso depois.
+
+O atalho abre um console (é o servidor) e o navegador em `http://localhost:8980`. Seus dados ficam
+em `%LOCALAPPDATA%\Diploma` — cofre, sessões, trabalhos — e sobrevivem a atualização e a
+desinstalação.
+
+**Atualizar:** o app consulta as releases sozinho (no início e a cada 6 h). Quando há versão
+nova, aparece um selo na barra lateral; em **Configuração → Atualizações**, "Baixar e instalar"
+fecha o Diploma, troca os arquivos e reabre. Igual ao Claude Indicator.
+
+## Rodar do código-fonte
 
 ```bash
 npm install

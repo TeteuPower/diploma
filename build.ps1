@@ -1,4 +1,4 @@
-<#
+﻿<#
     Empacota o Diploma e (se o Inno Setup estiver instalado) gera o instalador.
 
     O que sai em publish\ é a pasta instalada, inteira:
@@ -139,7 +139,7 @@ if (-not $NoInstaller) {
         if ($LASTEXITCODE -ne 0) { Write-Host 'ISCC falhou.' -ForegroundColor Red; exit $LASTEXITCODE }
         Get-ChildItem $dist -Filter "Diploma-Setup-$versao.exe" | ForEach-Object {
             $mb = [math]::Round($_.Length / 1MB, 1)
-            Write-Host ("Instalador: " + $_.FullName + " ($mb MB)") -ForegroundColor Green
+            Write-Host ("Instalador: " + $_.FullName + " ($($mb) MB)") -ForegroundColor Green
         }
     } else {
         Write-Host 'Inno Setup 6 não encontrado — instalador não gerado.' -ForegroundColor Yellow

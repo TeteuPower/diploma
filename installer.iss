@@ -1,4 +1,4 @@
-; Instalador do Diploma (Inno Setup 6)
+﻿; Instalador do Diploma (Inno Setup 6)
 ; Gere com: .\build.ps1   — a versão chega por /DMyAppVersion=X.Y.Z, lida do package.json.
 
 #ifndef MyAppVersion
